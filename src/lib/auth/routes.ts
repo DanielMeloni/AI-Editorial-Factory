@@ -1,4 +1,11 @@
-/** Prefissi delle rotte accessibili solo a utenti autenticati. */
+/**
+ * Prefissi delle rotte accessibili solo a utenti autenticati.
+ *
+ * `/diagnostica` è deliberatamente fuori da questo elenco: se il database non
+ * è raggiungibile nemmeno l'accesso funziona, e una diagnosi dietro il login
+ * sarebbe irraggiungibile proprio quando serve. La pagina non espone alcun
+ * valore, solo presenza o assenza.
+ */
 export const PROTECTED_PREFIXES = ['/dashboard', '/projects', '/settings'] as const;
 
 /** Rotte riservate agli utenti NON autenticati (login, registrazione, ...). */

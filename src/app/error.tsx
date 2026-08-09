@@ -66,7 +66,10 @@ export default function GlobalError({
 
         <div className="flex flex-wrap gap-2">
           <Button onClick={reset}>Riprova</Button>
-          <Link href="/dashboard" className={buttonVariants({ variant: 'secondary' })}>
+          <Link href="/diagnostica" className={buttonVariants({ variant: 'secondary' })}>
+            Verifica la configurazione
+          </Link>
+          <Link href="/dashboard" className={buttonVariants({ variant: 'ghost' })}>
             Torna alla dashboard
           </Link>
         </div>
