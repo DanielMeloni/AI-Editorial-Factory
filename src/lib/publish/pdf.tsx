@@ -1,0 +1,312 @@
+import 'server-only';
+
+import * as React from 'react';
+import {
+  Document,
+  Page,
+  Text,
+  View,
+  StyleSheet,
+  renderToBuffer,
+} from '@react-pdf/renderer';
+import { unified } from 'unified';
+import remarkParse from 'remark-parse';
+import remarkGfm from 'remark-gfm';
+import type { Root, RootContent, PhrasingContent } from 'mdast';
+import type { Citation, ExportMeta } from './markdown';
+
+/**
+ * Generazione del PDF.
+ *
+ * Scelta di fondo: `@react-pdf/renderer` è JavaScript puro. L'alternativa
+ * consueta — Puppeteer con Chromium — richiede un binario da oltre cento
+ * megabyte nel bundle serverless, che eccede i limiti di una Vercel Function e
+ * va installato a ogni avvio a freddo. Qui non c'è alcun binario: il PDF si
+ * genera ovunque giri Node.
+ *
+ * Il documento è costruito dall'albero Markdown, non dall'HTML: così la
+ * struttura tipografica è controllata direttamente e non dipende da un motore
+ * di rendering.
+ */
+
+const colori = {
+  testo: '#16233d',
+  tenue: '#5a6b87',
+  bordo: '#dfe4ec',
+  codiceFondo: '#f4f6fa',
+  accento: '#3556a8',
+};
+
+const styles = StyleSheet.create({
+  page: {
+    paddingTop: 56,
+    paddingBottom: 64,
+    paddingHorizontal: 64,
+    fontSize: 10.5,
+    lineHeight: 1.6,
+    color: colori.testo,
+    fontFamily: 'Times-Roman',
+  },
+  eyebrow: { fontSize: 8, color: colori.tenue, letterSpacing: 1, marginBottom: 6, fontFamily: 'Helvetica' },
+  titolo: { fontSize: 22, fontFamily: 'Times-Bold', marginBottom: 8, lineHeight: 1.25 },
+  metaTesta: { fontSize: 9, color: colori.tenue, marginBottom: 20, fontFamily: 'Helvetica' },
+  h1: { fontSize: 17, fontFamily: 'Times-Bold', marginTop: 20, marginBottom: 8 },
+  h2: { fontSize: 14, fontFamily: 'Times-Bold', marginTop: 18, marginBottom: 6 },
+  h3: { fontSize: 12, fontFamily: 'Times-Bold', marginTop: 14, marginBottom: 5 },
+  h4: { fontSize: 11, fontFamily: 'Times-Italic', marginTop: 12, marginBottom: 4 },
+  paragrafo: { marginBottom: 9, textAlign: 'justify' },
+  codiceBlocco: {
+    backgroundColor: colori.codiceFondo,
+    borderWidth: 0.5,
+    borderColor: colori.bordo,
+    borderRadius: 3,
+    padding: 8,
+    marginBottom: 10,
+  },
+  codiceRiga: { fontFamily: 'Courier', fontSize: 8.5, lineHeight: 1.45 },
+  codiceLingua: { fontFamily: 'Helvetica', fontSize: 7, color: colori.tenue, marginBottom: 4, letterSpacing: 0.5 },
+  citazione: { borderLeftWidth: 2, borderLeftColor: colori.bordo, paddingLeft: 10, marginBottom: 10, color: colori.tenue },
+  vocElenco: { flexDirection: 'row', marginBottom: 4 },
+  segno: { width: 16, color: colori.tenue },
+  vocTesto: { flex: 1 },
+  figura: {
+    borderWidth: 0.5,
+    borderColor: colori.bordo,
+    borderStyle: 'dashed',
+    borderRadius: 3,
+    padding: 14,
+    marginBottom: 10,
+    alignItems: 'center',
+  },
+  didascalia: { fontSize: 8.5, color: colori.tenue, fontFamily: 'Helvetica', marginTop: 5, textAlign: 'center' },
+  separatore: { borderBottomWidth: 0.5, borderBottomColor: colori.bordo, marginVertical: 14 },
+  tabellaRiga: { flexDirection: 'row', borderBottomWidth: 0.5, borderBottomColor: colori.bordo },
+  tabellaCella: { flex: 1, padding: 5, fontSize: 9 },
+  tabellaIntestazione: { backgroundColor: colori.codiceFondo, fontFamily: 'Times-Bold' },
+  riferimenti: { marginTop: 24, paddingTop: 12, borderTopWidth: 0.5, borderTopColor: colori.bordo },
+  titoloRiferimenti: { fontSize: 12, fontFamily: 'Times-Bold', marginBottom: 6 },
+  riferimento: { fontSize: 8.5, color: colori.tenue, marginBottom: 3 },
+  piede: {
+    position: 'absolute',
+    bottom: 32,
+    left: 64,
+    right: 64,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    fontSize: 8,
+    color: colori.tenue,
+    fontFamily: 'Helvetica',
+  },
+});
+
+/** Converte il testo in linea in nodi Text, conservando enfasi e codice. */
+function renderInline(nodes: PhrasingContent[], keyPrefix: string): React.ReactNode[] {
+  return nodes.map((node, index) => {
+    const key = `${keyPrefix}-${index}`;
+
+    switch (node.type) {
+      case 'text':
+        return <Text key={key}>{node.value}</Text>;
+      case 'strong':
+        return (
+          <Text key={key} style={{ fontFamily: 'Times-Bold' }}>
+            {renderInline(node.children, key)}
+          </Text>
+        );
+      case 'emphasis':
+        return (
+          <Text key={key} style={{ fontFamily: 'Times-Italic' }}>
+            {renderInline(node.children, key)}
+          </Text>
+        );
+      case 'inlineCode':
+        return (
+          <Text key={key} style={{ fontFamily: 'Courier', fontSize: 9 }}>
+            {node.value}
+          </Text>
+        );
+      case 'link':
+        // L'URL viene mostrato accanto al testo: su carta un collegamento
+        // cliccabile non serve a nulla se non se ne legge la destinazione.
+        return (
+          <Text key={key}>
+            <Text style={{ color: colori.accento }}>{renderInline(node.children, key)}</Text>
+            <Text style={{ fontSize: 8, color: colori.tenue }}> ({node.url})</Text>
+          </Text>
+        );
+      case 'delete':
+        return (
+          <Text key={key} style={{ textDecoration: 'line-through' }}>
+            {renderInline(node.children, key)}
+          </Text>
+        );
+      case 'break':
+        return <Text key={key}>{'\n'}</Text>;
+      case 'image':
+        return (
+          <Text key={key} style={{ fontSize: 8, color: colori.tenue }}>
+            [{node.alt || 'figura'}]
+          </Text>
+        );
+      default:
+        return null;
+    }
+  });
+}
+
+const STILI_TITOLO = [styles.h1, styles.h1, styles.h2, styles.h3, styles.h4, styles.h4, styles.h4];
+
+function renderBlock(node: RootContent, key: string): React.ReactNode {
+  switch (node.type) {
+    case 'heading':
+      return (
+        <Text key={key} style={STILI_TITOLO[node.depth]} minPresenceAhead={40}>
+          {renderInline(node.children, key)}
+        </Text>
+      );
+
+    case 'paragraph': {
+      // Un paragrafo con la sola immagine diventa una figura con didascalia.
+      const soloImmagine =
+        node.children.length === 1 && node.children[0]?.type === 'image'
+          ? node.children[0]
+          : null;
+
+      if (soloImmagine && soloImmagine.type === 'image') {
+        return (
+          <View key={key} style={styles.figura} wrap={false}>
+            <Text style={{ fontSize: 8, color: colori.tenue }}>
+              [ {soloImmagine.alt || 'figura'} ]
+            </Text>
+            {soloImmagine.alt ? <Text style={styles.didascalia}>{soloImmagine.alt}</Text> : null}
+          </View>
+        );
+      }
+
+      return (
+        <Text key={key} style={styles.paragrafo}>
+          {renderInline(node.children, key)}
+        </Text>
+      );
+    }
+
+    case 'code':
+      return (
+        <View key={key} style={styles.codiceBlocco} wrap={false}>
+          {node.lang ? <Text style={styles.codiceLingua}>{node.lang.toUpperCase()}</Text> : null}
+          {node.value.split('\n').map((riga, index) => (
+            <Text key={`${key}-r${index}`} style={styles.codiceRiga}>
+              {riga || ' '}
+            </Text>
+          ))}
+        </View>
+      );
+
+    case 'blockquote':
+      return (
+        <View key={key} style={styles.citazione}>
+          {node.children.map((child, index) => renderBlock(child, `${key}-${index}`))}
+        </View>
+      );
+
+    case 'list':
+      return (
+        <View key={key} style={{ marginBottom: 9 }}>
+          {node.children.map((item, index) => (
+            <View key={`${key}-i${index}`} style={styles.vocElenco}>
+              <Text style={styles.segno}>{node.ordered ? `${(node.start ?? 1) + index}.` : '•'}</Text>
+              <View style={styles.vocTesto}>
+                {item.children.map((child, childIndex) =>
+                  renderBlock(child, `${key}-i${index}-${childIndex}`),
+                )}
+              </View>
+            </View>
+          ))}
+        </View>
+      );
+
+    case 'table':
+      return (
+        <View key={key} style={{ marginBottom: 10 }}>
+          {node.children.map((riga, rigaIndex) => (
+            <View
+              key={`${key}-r${rigaIndex}`}
+              style={rigaIndex === 0 ? [styles.tabellaRiga, styles.tabellaIntestazione] : styles.tabellaRiga}
+              wrap={false}
+            >
+              {riga.children.map((cella, cellaIndex) => (
+                <Text key={`${key}-r${rigaIndex}-c${cellaIndex}`} style={styles.tabellaCella}>
+                  {renderInline(cella.children, `${key}-${rigaIndex}-${cellaIndex}`)}
+                </Text>
+              ))}
+            </View>
+          ))}
+        </View>
+      );
+
+    case 'thematicBreak':
+      return <View key={key} style={styles.separatore} />;
+
+    default:
+      return null;
+  }
+}
+
+export interface PdfExportOptions {
+  citations?: Citation[];
+}
+
+export async function exportPdf(
+  contentMd: string,
+  meta: ExportMeta,
+  options: PdfExportOptions = {},
+): Promise<Uint8Array> {
+  const albero = unified().use(remarkParse).use(remarkGfm).parse(contentMd) as Root;
+
+  const citazioni = options.citations ?? [];
+
+  const documento = (
+    <Document
+      title={`${meta.title} — ${meta.projectTitle}`}
+      author={meta.author}
+      subject={meta.chapterLabel ?? undefined}
+      creator="AI Editorial Factory"
+      producer="AI Editorial Factory"
+      language="it"
+    >
+      <Page size="A4" style={styles.page}>
+        {meta.chapterLabel ? (
+          <Text style={styles.eyebrow}>{meta.chapterLabel.toUpperCase()}</Text>
+        ) : null}
+        <Text style={styles.titolo}>{meta.title}</Text>
+        <Text style={styles.metaTesta}>
+          {[meta.author, meta.projectTitle, meta.volume, `versione ${meta.versionNo}`]
+            .filter(Boolean)
+            .join('  ·  ')}
+        </Text>
+
+        {albero.children.map((node, index) => renderBlock(node, `b${index}`))}
+
+        {citazioni.length > 0 ? (
+          <View style={styles.riferimenti}>
+            <Text style={styles.titoloRiferimenti}>Riferimenti</Text>
+            {citazioni.map((citation, index) => (
+              <Text key={`ref-${index}`} style={styles.riferimento}>
+                {index + 1}. {citation.title || citation.publisher || citation.url} — {citation.url}
+                {citation.isOfficial ? ' (documentazione ufficiale)' : ''}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+
+        <View style={styles.piede} fixed>
+          <Text>{meta.projectTitle}</Text>
+          <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
+        </View>
+      </Page>
+    </Document>
+  );
+
+  const buffer = await renderToBuffer(documento);
+  return new Uint8Array(buffer);
+}

@@ -1,0 +1,3 @@
+# Applicazione privata: nessuna indicizzazione.
+User-agent: *
+Disallow: /

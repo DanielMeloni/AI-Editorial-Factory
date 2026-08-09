@@ -1,0 +1,53 @@
+# dipendenze
+node_modules/
+.pnp
+.pnp.*
+
+# build Next.js
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo
+
+# test e coverage
+/coverage/
+/playwright-report/
+/test-results/
+/blob-report/
+/.playwright/
+
+# variabili di ambiente - NESSUN segreto deve entrare nel repository
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# Supabase locale
+/supabase/.branches/
+/supabase/.temp/
+/supabase/.env
+
+# Vercel
+.vercel/
+
+# sorgenti editoriali reali (manuali, ZIP, PDF): mai versionati
+/private/
+/uploads/
+*.zip
+!tests/fixtures/*.zip
+
+# sistema operativo ed editor
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# artefatti temporanei
+*.log
+npm-debug.log*
+.cache/
+/.swc
