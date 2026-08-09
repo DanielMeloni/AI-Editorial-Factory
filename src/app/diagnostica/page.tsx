@@ -108,6 +108,13 @@ export default async function DiagnosticaPage() {
             </code>{' '}
             mostra il messaggio d’errore completo nella pagina, cosa che la build di produzione non fa.
           </p>
+          <p>
+            Nell’SQL Editor di Supabase,{' '}
+            <code className="rounded bg-surface-muted px-1.5 py-0.5 font-mono text-xs">
+              select id, public from storage.buckets order by id;
+            </code>{' '}
+            mostra i bucket realmente esistenti, indipendentemente da questa pagina.
+          </p>
         </CardContent>
       </Card>
 

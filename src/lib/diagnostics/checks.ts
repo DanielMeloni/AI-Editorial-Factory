@@ -198,18 +198,41 @@ export async function eseguiDiagnosi(): Promise<Diagnosi> {
   // -------------------------------------------------------------------------
   // Storage
   // -------------------------------------------------------------------------
-  if (raggiungibile) {
+  //
+  // `storage.buckets` ha la RLS attiva: con la publishable key l'elenco torna
+  // VUOTO senza errore. Interpretarlo come «i bucket non esistono» produce un
+  // falso negativo. Solo il service role vede la verità; senza, il controllo
+  // resta dichiaratamente non conclusivo.
+  if (!raggiungibile) {
+    controlli.push({
+      nome: 'Bucket di storage',
+      esito: 'saltato',
+      dettaglio: 'Controllo saltato: il progetto non è raggiungibile.',
+    });
+  } else if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    controlli.push({
+      nome: 'Bucket di storage',
+      esito: 'avviso',
+      dettaglio:
+        'Controllo non conclusivo: senza chiave di servizio l’elenco dei bucket non è leggibile, ' +
+        'perché protetto da RLS.',
+      rimedio:
+        'Imposta SUPABASE_SERVICE_ROLE_KEY, oppure verifica a mano nel dashboard che esistano i tre bucket privati.',
+    });
+  } else {
     try {
-      const supabase = await createClient();
+      const { createAdminClient } = await import('@/lib/supabase/admin');
+      const admin = createAdminClient();
       const attesi = ['project-sources', 'generated-assets', 'publication-exports'];
-      const { data, error } = await supabase.storage.listBuckets();
+
+      const { data, error } = await admin.storage.listBuckets();
 
       if (error) {
         controlli.push({
           nome: 'Bucket di storage',
-          esito: 'avviso',
-          dettaglio: 'Impossibile elencare i bucket con la chiave pubblica: controllo non conclusivo.',
-          rimedio: 'Verifica nel dashboard che esistano i tre bucket privati.',
+          esito: 'errore',
+          dettaglio: 'Lettura dei bucket non riuscita con la chiave di servizio.',
+          rimedio: 'Verifica che SUPABASE_SERVICE_ROLE_KEY appartenga a questo progetto.',
         });
       } else {
         const presenti = new Set((data ?? []).map((b) => b.name));
@@ -221,7 +244,9 @@ export async function eseguiDiagnosi(): Promise<Diagnosi> {
             nome: 'Bucket di storage',
             esito: 'errore',
             dettaglio: `Mancano ${mancanti.length} bucket: ${mancanti.join(', ')}.`,
-            rimedio: 'Li crea la migration 10. Applica le migration.',
+            rimedio:
+              'Li crea la migration 10. Se lo schema è già applicato, creali a mano dal dashboard ' +
+              'in Storage → New bucket, lasciandoli PRIVATI.',
           });
         } else if (pubblici.length > 0) {
           controlli.push({
@@ -245,12 +270,6 @@ export async function eseguiDiagnosi(): Promise<Diagnosi> {
         dettaglio: 'Controllo non riuscito.',
       });
     }
-  } else {
-    controlli.push({
-      nome: 'Bucket di storage',
-      esito: 'saltato',
-      dettaglio: 'Controllo saltato: il progetto non è raggiungibile.',
-    });
   }
 
   return riepiloga(controlli);
