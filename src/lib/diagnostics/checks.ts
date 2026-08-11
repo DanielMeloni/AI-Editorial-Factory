@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { access } from 'node:fs/promises';
+import { join } from 'node:path';
 import { createClient } from '@/lib/supabase/server';
 import { isSupabaseConfigured } from '@/lib/env';
 
@@ -45,6 +47,58 @@ const TABELLE_COLLANE = ['series', 'series_volumes'] as const;
 
 export async function eseguiDiagnosi(): Promise<Diagnosi> {
   const controlli: Controllo[] = [];
+
+  // -------------------------------------------------------------------------
+  // Da dove sta girando il server
+  // -------------------------------------------------------------------------
+  //
+  // Next.js cerca `.env.local` nella cartella da cui viene avviato. Se il
+  // server parte da un'altra cartella — un secondo clone del progetto, o una
+  // shell aperta altrove — il file esiste ma non viene mai letto, e ogni
+  // variabile risulta assente pur essendo scritta correttamente.
+  const cartella = process.cwd();
+  const envLocale = join(cartella, '.env.local');
+  let envPresente = false;
+
+  try {
+    await access(envLocale);
+    envPresente = true;
+  } catch {
+    envPresente = false;
+  }
+
+  controlli.push(
+    envPresente
+      ? {
+          nome: 'File .env.local',
+          esito: 'ok',
+          dettaglio: `Trovato nella cartella da cui gira il server: ${cartella}`,
+        }
+      : {
+          nome: 'File .env.local',
+          esito: 'errore',
+          dettaglio: `Non presente nella cartella da cui gira il server: ${cartella}`,
+          rimedio:
+            'Il server è stato avviato da una cartella diversa da quella del progetto, oppure il ' +
+            'file ha un altro nome. Chiudi il server, spostati nella cartella che contiene ' +
+            'package.json e riavvia.',
+        },
+  );
+
+  // Le variabili NEXT_PUBLIC_* vengono sostituite staticamente durante `next
+  // build`: modificarle dopo la build non ha alcun effetto finché non si
+  // ricostruisce. È l'inganno più frequente in produzione locale.
+  const inProduzione = process.env.NODE_ENV === 'production';
+  if (inProduzione) {
+    controlli.push({
+      nome: 'Modalità di esecuzione',
+      esito: 'avviso',
+      dettaglio:
+        'Build di produzione. Le variabili NEXT_PUBLIC_* sono state fissate al momento della build: ' +
+        'se hai modificato .env.local dopo, il valore vecchio è ancora in uso.',
+      rimedio: 'Dopo ogni modifica alle NEXT_PUBLIC_*, esegui di nuovo `npm run build`.',
+    });
+  }
 
   // -------------------------------------------------------------------------
   // Variabili di ambiente
