@@ -4,7 +4,10 @@ import { CheckCircle2, CircleDashed, TriangleAlert, XCircle } from 'lucide-react
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert } from '@/components/ui/alert';
 import { buttonVariants } from '@/components/ui/button';
+import { redirect } from 'next/navigation';
 import { eseguiDiagnosi, type Esito } from '@/lib/diagnostics/checks';
+import { getOptionalUser } from '@/lib/auth/guards';
+import { isSupabaseConfigured } from '@/lib/env';
 
 export const metadata: Metadata = { title: 'Diagnostica' };
 export const dynamic = 'force-dynamic';
@@ -19,15 +22,24 @@ const ICONE: Record<Esito, { icona: typeof CheckCircle2; classe: string; etichet
 /**
  * Pagina di diagnosi della configurazione.
  *
- * Deliberatamente accessibile senza autenticazione: se il database non è
- * raggiungibile, nemmeno l'accesso funziona, e una diagnosi dietro il login
- * sarebbe irraggiungibile proprio quando serve.
+ * L'accesso segue lo stato dell'installazione, non una regola fissa:
  *
- * Non espone alcun valore: riporta soltanto se una cosa è presente o assente,
- * e come rimediare. Un attaccante non apprende nulla che non scoprirebbe
- * tentando di usare l'applicazione.
+ *  - **applicazione non ancora configurata** → aperta. È il momento in cui
+ *    serve, e non c'è nulla da proteggere: senza Supabase non esiste né un
+ *    login da superare né un dato da esporre.
+ *  - **applicazione configurata** → richiede l'autenticazione. Su un URL
+ *    pubblico, lasciare aperta una pagina che racconta lo stato del database
+ *    sarebbe un regalo a chi la trovasse.
+ *
+ * In nessun caso viene mostrato un valore: solo presenza o assenza, e il
+ * rimedio.
  */
 export default async function DiagnosticaPage() {
+  if (isSupabaseConfigured()) {
+    const utente = await getOptionalUser();
+    if (!utente) redirect('/login?redirectTo=%2Fdiagnostica');
+  }
+
   const diagnosi = await eseguiDiagnosi();
 
   return (

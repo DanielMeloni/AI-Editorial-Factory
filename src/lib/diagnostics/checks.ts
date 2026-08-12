@@ -49,54 +49,68 @@ export async function eseguiDiagnosi(): Promise<Diagnosi> {
   const controlli: Controllo[] = [];
 
   // -------------------------------------------------------------------------
-  // Da dove sta girando il server
+  // Dove sta girando l'applicazione
   // -------------------------------------------------------------------------
   //
-  // Next.js cerca `.env.local` nella cartella da cui viene avviato. Se il
-  // server parte da un'altra cartella — un secondo clone del progetto, o una
-  // shell aperta altrove — il file esiste ma non viene mai letto, e ogni
-  // variabile risulta assente pur essendo scritta correttamente.
-  const cartella = process.cwd();
-  const envLocale = join(cartella, '.env.local');
-  let envPresente = false;
+  // Su Vercel non esiste alcun `.env.local`: le variabili arrivano dal pannello
+  // del progetto. Cercare un file lì sarebbe un controllo privo di senso, e il
+  // rimedio suggerito manderebbe fuori strada.
+  const suVercel = process.env.VERCEL === '1';
+  const ambienteVercel = process.env.VERCEL_ENV ?? null;
 
-  try {
-    await access(envLocale);
-    envPresente = true;
-  } catch {
-    envPresente = false;
+  if (suVercel) {
+    controlli.push({
+      nome: 'Ambiente di esecuzione',
+      esito: 'ok',
+      dettaglio:
+        `In esecuzione su Vercel${ambienteVercel ? `, ambiente «${ambienteVercel}»` : ''}. ` +
+        'Le variabili si impostano nel pannello del progetto, non in un file.',
+    });
+  } else {
+    // In locale invece il file conta, e Next.js lo cerca nella cartella da cui
+    // il server è stato avviato: da una cartella diversa non verrebbe mai letto.
+    const cartella = process.cwd();
+    let envPresente = false;
+
+    try {
+      await access(join(cartella, '.env.local'));
+      envPresente = true;
+    } catch {
+      envPresente = false;
+    }
+
+    controlli.push(
+      envPresente
+        ? {
+            nome: 'File .env.local',
+            esito: 'ok',
+            dettaglio: `Trovato nella cartella da cui gira il server: ${cartella}`,
+          }
+        : {
+            nome: 'File .env.local',
+            esito: 'errore',
+            dettaglio: `Non presente nella cartella da cui gira il server: ${cartella}`,
+            rimedio:
+              'Il server è stato avviato da una cartella diversa da quella del progetto, oppure il ' +
+              'file ha un altro nome. Chiudi il server, spostati nella cartella che contiene ' +
+              'package.json e riavvia.',
+          },
+    );
   }
 
-  controlli.push(
-    envPresente
-      ? {
-          nome: 'File .env.local',
-          esito: 'ok',
-          dettaglio: `Trovato nella cartella da cui gira il server: ${cartella}`,
-        }
-      : {
-          nome: 'File .env.local',
-          esito: 'errore',
-          dettaglio: `Non presente nella cartella da cui gira il server: ${cartella}`,
-          rimedio:
-            'Il server è stato avviato da una cartella diversa da quella del progetto, oppure il ' +
-            'file ha un altro nome. Chiudi il server, spostati nella cartella che contiene ' +
-            'package.json e riavvia.',
-        },
-  );
-
-  // Le variabili NEXT_PUBLIC_* vengono sostituite staticamente durante `next
-  // build`: modificarle dopo la build non ha alcun effetto finché non si
-  // ricostruisce. È l'inganno più frequente in produzione locale.
-  const inProduzione = process.env.NODE_ENV === 'production';
-  if (inProduzione) {
+  // Le variabili NEXT_PUBLIC_* vengono sostituite staticamente durante la
+  // build: modificarle dopo non ha alcun effetto finché non si ricostruisce.
+  // È l'inganno più frequente, in locale come su Vercel.
+  if (process.env.NODE_ENV === 'production') {
     controlli.push({
       nome: 'Modalità di esecuzione',
       esito: 'avviso',
       dettaglio:
-        'Build di produzione. Le variabili NEXT_PUBLIC_* sono state fissate al momento della build: ' +
-        'se hai modificato .env.local dopo, il valore vecchio è ancora in uso.',
-      rimedio: 'Dopo ogni modifica alle NEXT_PUBLIC_*, esegui di nuovo `npm run build`.',
+        'Build di produzione. Le variabili NEXT_PUBLIC_* sono state fissate durante la build: ' +
+        'modificarle dopo non ha effetto finché non si ricostruisce.',
+      rimedio: suVercel
+        ? 'Dopo aver aggiunto o cambiato una variabile, rilancia il deploy: Deployments → ⋯ → Redeploy.'
+        : 'Dopo ogni modifica alle NEXT_PUBLIC_*, esegui di nuovo `npm run build`.',
     });
   }
 
@@ -111,7 +125,9 @@ export async function eseguiDiagnosi(): Promise<Diagnosi> {
           nome: 'URL dell’applicazione',
           esito: 'errore',
           dettaglio: 'NEXT_PUBLIC_APP_URL non è impostata.',
-          rimedio: 'Aggiungila a .env.local, con lo schema: http://localhost:3000',
+          rimedio: suVercel
+            ? 'Impostala in Vercel → Settings → Environment Variables, col dominio dell’ambiente, poi rilancia il deploy.'
+            : 'Aggiungila a .env.local, con lo schema: http://localhost:3000',
         },
   );
 
@@ -127,7 +143,9 @@ export async function eseguiDiagnosi(): Promise<Diagnosi> {
           nome: 'Configurazione Supabase',
           esito: 'errore',
           dettaglio: 'Manca NEXT_PUBLIC_SUPABASE_URL oppure NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.',
-          rimedio: 'Esegui `npm run check:env`: elenca ciò che manca senza stampare alcun valore.',
+          rimedio: suVercel
+            ? 'Impostale in Vercel → Settings → Environment Variables, poi rilancia il deploy: le NEXT_PUBLIC_* vengono fissate durante la build.'
+            : 'Esegui `npm run check:env`: elenca ciò che manca senza stampare alcun valore.',
         },
   );
 
@@ -143,8 +161,9 @@ export async function eseguiDiagnosi(): Promise<Diagnosi> {
           esito: 'avviso',
           dettaglio:
             'SUPABASE_SERVICE_ROLE_KEY non è impostata: audit log e workflow non potranno scrivere.',
-          rimedio:
-            'Copiala da Supabase → Project Settings → API Keys → Secret key. Mai con prefisso NEXT_PUBLIC_.',
+          rimedio: suVercel
+            ? 'Aggiungila in Vercel → Settings → Environment Variables, SENZA prefisso NEXT_PUBLIC_, poi rilancia il deploy.'
+            : 'Copiala da Supabase → Project Settings → API Keys → Secret key. Mai con prefisso NEXT_PUBLIC_.',
         },
   );
 
