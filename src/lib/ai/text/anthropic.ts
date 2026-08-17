@@ -48,7 +48,13 @@ export class AnthropicTextProvider implements TextProvider {
 
     if (!response.ok) {
       const retryable = response.status === 429 || response.status >= 500;
-      throw new ProviderError(`Anthropic ha risposto ${response.status}.`, retryable, this.name);
+      throw new ProviderError(
+        `Anthropic ha risposto ${response.status}.`,
+        retryable,
+        this.name,
+        undefined,
+        response.status,
+      );
     }
 
     const payload = (await response.json()) as {

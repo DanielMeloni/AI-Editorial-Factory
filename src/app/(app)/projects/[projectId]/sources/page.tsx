@@ -5,7 +5,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SourceUploader } from '@/components/projects/source-uploader';
+import { ReferenceLibrary } from '@/components/sources/reference-library';
+import { FoundSources } from '@/components/sources/found-sources';
+import { WebDiscovery } from '@/components/sources/web-discovery';
+import { NextStepButton, SearchSourcesButton } from '@/components/sources/source-actions';
 import { getProject, listSources } from '@/lib/projects/queries';
+import {
+  getNextStep,
+  listProposedReferences,
+  listReferences,
+  listSuggestions,
+} from '@/lib/sources/queries';
+import { isWebSearchEnabled } from '@/lib/ai/registry';
 import type { SourceStatus } from '@/lib/db/types';
 
 const STATUS: Record<SourceStatus, { label: string; tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger' }> = {
@@ -37,18 +48,117 @@ export default async function SourcesPage({
   const project = await getProject(projectId);
   if (!project) notFound();
 
-  const sources = await listSources(projectId);
+  const [sources, references, proposals, suggestions, nextStep] = await Promise.all([
+    listSources(projectId),
+    listReferences(projectId),
+    listProposedReferences(projectId),
+    listSuggestions(projectId),
+    getNextStep(projectId),
+  ]);
+
+  const searchEnabled = isWebSearchEnabled();
+
+  const daDecidere = suggestions.filter((s) => s.status === 'proposed').length;
+  const indicizzate = references.filter((r) => r.status === 'indexed').length;
 
   return (
     <main id="contenuto-principale" className="flex-1 space-y-6 p-4 sm:p-6">
       <PageHeader
         title="Fonti"
-        description="Archivi caricati e loro stato di elaborazione."
+        description="Biblioteca del progetto, fonti trovate automaticamente e archivi del manoscritto."
       />
+
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchSourcesButton projectId={projectId} />
+        <NextStepButton step={nextStep} />
+        <p className="text-xs text-muted-foreground">{nextStep.detail}</p>
+      </div>
+
+      {/* ----------------------------------------------------------------- */}
+      {/* Ricerca sul web                                                    */}
+      {/* ----------------------------------------------------------------- */}
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            Cerca fonti sul web
+            {proposals.length > 0 ? (
+              <Badge tone="info" className="ml-2 align-middle">
+                {proposals.length} da decidere
+              </Badge>
+            ) : null}
+          </CardTitle>
+          <CardDescription>
+            L’AI cerca materiale di riferimento per il manuale — documentazione ufficiale,
+            specifiche, guide — e ti mostra quello che ritiene utile, con il motivo di ogni
+            scelta. <strong>Ogni indirizzo viene aperto prima di comparire qui</strong>: chi non
+            risponde non entra nell’elenco, e il titolo che leggi è quello letto dalla pagina, non
+            quello dichiarato. Accettando una fonte, questa entra in biblioteca e viene
+            indicizzata.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <WebDiscovery
+            projectId={projectId}
+            proposals={proposals}
+            searchEnabled={searchEnabled}
+          />
+        </CardContent>
+      </Card>
+
+      {/* ----------------------------------------------------------------- */}
+      {/* Fonti trovate per le singole affermazioni                          */}
+      {/* ----------------------------------------------------------------- */}
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            Fonti per le affermazioni
+            {daDecidere > 0 ? (
+              <Badge tone="info" className="ml-2 align-middle">
+                {daDecidere} da decidere
+              </Badge>
+            ) : null}
+          </CardTitle>
+          <CardDescription>
+            Per ogni affermazione priva di rimando, la ricerca confronta il testo con la
+            documentazione ufficiale e con la biblioteca del progetto. Accanto a ogni proposta
+            trovi i termini che l’hanno prodotta: sono il motivo, e servono a decidere in un
+            istante. Accettare una fonte la aggiunge alle citazioni del capitolo; il testo non
+            viene toccato — dove collocare il rimando è una scelta editoriale.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FoundSources suggestions={suggestions} />
+        </CardContent>
+      </Card>
+
+      {/* ----------------------------------------------------------------- */}
+      {/* Biblioteca                                                         */}
+      {/* ----------------------------------------------------------------- */}
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            Biblioteca del progetto
+            {indicizzate > 0 ? (
+              <Badge tone="success" className="ml-2 align-middle">
+                {indicizzate} indicizzate
+              </Badge>
+            ) : null}
+          </CardTitle>
+          <CardDescription>
+            Link e PDF che vuoi affiancare alla documentazione ufficiale. Vengono indicizzati —
+            un PDF pagina per pagina — e da quel momento la ricerca automatica può proporli, con
+            l’indicazione della pagina. L’origine resta sempre scritta su ogni proposta: una
+            fonte della biblioteca non viene mai spacciata per documentazione del produttore.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ReferenceLibrary projectId={projectId} references={references} />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Carica un archivio</CardTitle>
+          <CardTitle>Archivio del manoscritto</CardTitle>
           <CardDescription>
             Solo file .zip, fino a 1 GiB. L’archivio viene inviato direttamente allo storage privato
             e analizzato sul server: percorsi verificati contro path traversal, hash SHA-256 per ogni

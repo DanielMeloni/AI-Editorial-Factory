@@ -61,11 +61,99 @@ classificata e marcata come sostenuta o meno da una fonte.
 
 ### Source Auditor
 
-Distingue la documentazione ufficiale del produttore (`cloud.google.com`,
-`dataform.co`, `developers.google.com`) dalle fonti della comunità
-(Stack Overflow, Medium). Le seconde sono utili, ma non sostituiscono la prima
-quando l'affermazione riguarda il comportamento del prodotto. Segnala anche i
-capitoli privi di qualsiasi riferimento e gli URL non cifrati.
+Fa due cose: giudica le fonti che ci sono e **cerca quelle che mancano**.
+
+**Le fonti presenti.** Distingue la documentazione ufficiale del produttore
+(`cloud.google.com`, `docs.cloud.google.com`, `dataform.co`,
+`developers.google.com`) dalle fonti della comunità (Stack Overflow, Medium).
+Le seconde sono utili, ma non sostituiscono la prima quando l'affermazione
+riguarda il comportamento del prodotto. Segnala i capitoli privi di qualsiasi
+riferimento, gli URL non cifrati e — controllo aggiunto con la ricerca
+automatica — i collegamenti su dominio ufficiale che l'indice non conosce: la
+documentazione viene riorganizzata di continuo, e un collegamento morto è
+peggio di uno assente.
+
+**Le fonti mancanti.** Riceve dal Technical Verifier le affermazioni marcate
+`hasSupportingSource: false` e, per ognuna, interroga l'indice curato. Quando
+trova, propone fino a tre pagine con il punteggio e i **termini che hanno
+prodotto l'aggancio**; quando non trova, lo dichiara e conta l'affermazione fra
+le non risolte. Non ripiega mai su una fonte qualsiasi.
+
+| Esito del riferimento | Significato |
+|---|---|
+| `ufficiale_indicizzata` | Dominio del produttore, pagina presente nell'indice |
+| `ufficiale_non_indicizzata` | Dominio giusto, pagina che non risulta: da aprire |
+| `comunita` | Utile, non autorevole |
+| `sconosciuta` | Dominio non riconosciuto |
+| `non_valida` | URL non interpretabile |
+
+### L'indice curato delle fonti
+
+La ricerca **non interroga il web aperto**: interroga un indice di pagine
+ufficiali censite in `src/lib/sources/catalog.data.ts`. È una scelta, non un
+limite tecnico.
+
+| Proprietà | Conseguenza |
+|---|---|
+| Chiuso | Una fonte proposta esiste perché è stata censita, non perché è stata scritta in modo plausibile |
+| Deterministico | Stesso capitolo, stesso indice, stesse proposte: verificabile in un test |
+| Ufficiale per costruzione | Nell'indice entrano soltanto i domini del produttore |
+
+Il prezzo è la copertura: ciò che non è nell'indice non viene proposto, e il
+sistema lo dice invece di ripiegare su altro.
+
+L'aggancio fra un manuale in italiano e una documentazione in inglese avviene
+con un punteggio lessicale pesato per rarità del termine (IDF): «tabella»
+compare in mezzo indice e vale poco, «partizionamento» in due pagine e vale
+molto. Una sola parola in comune non basta a chiamare pertinente una pagina,
+salvo che sia un termine molto raro **e** il punteggio sia nettamente sopra
+soglia.
+
+`npm run sources:refresh` confronta l'indice con le sitemap ufficiali e riporta
+le pagine nuove e quelle non più pubblicate. Con `--write` aggiunge le nuove,
+marcate da rivedere; **non rimuove nulla e non tocca i termini scritti a mano** —
+sono la parte curata, ed è quella che fa funzionare l'aggancio.
+
+Le proposte finiscono in `source_suggestions`, tabella distinta da `citations`:
+una proposta non è una citazione finché un revisore non l'accetta.
+
+### La biblioteca del progetto
+
+L'indice ufficiale copre la documentazione del produttore. Un manuale però si
+appoggia anche ad altro — una specifica, una norma, un articolo, un documento
+interno — e dalla scheda **Fonti** quel materiale si aggiunge a mano: un
+indirizzo, oppure un PDF caricato.
+
+Non resta un elenco da consultare: viene **indicizzato**, e da quel momento la
+ricerca automatica lo propone insieme alla documentazione. Un PDF viene letto
+pagina per pagina, e il numero di pagina viaggia con il blocco fino alla
+proposta — al revisore serve sapere *dove* guardare, non ricevere duecento
+pagine e la parola «fidati».
+
+| Aspetto | Come è trattato |
+|---|---|
+| Provenienza | `origin` è scritto su ogni proposta: `catalogo_ufficiale` o `biblioteca`. Una fonte caricata non viene mai spacciata per documentazione del produttore |
+| Peso | Una fonte della biblioteca pesa 0,85 rispetto a 1 della documentazione — a meno che l'autore non la dichiari **autorevole** (una specifica, una norma), e allora vale quanto la fonte primaria |
+| Ambito | Fonte del volume, oppure dell'organizzazione e quindi ereditata da tutti i progetti. È lo schema delle collane |
+| Ordine | I candidati sono ordinati per pertinenza, **non** per provenienza: se una specifica caricata spiega l'affermazione meglio della documentazione, viene prima |
+
+Documentazione e biblioteca finiscono in **un solo indice**, costruito insieme.
+Non è un dettaglio: con due indici separati «0,8 nella biblioteca» e «0,8 nel
+catalogo» non vorrebbero dire la stessa cosa, e il revisore si troverebbe
+davanti classifiche non confrontabili.
+
+Che cosa succede quando una fonte non è indicizzabile — una pagina che si
+costruisce nel browser, un PDF che è una scansione — è dichiarato e non
+nascosto: la fonte resta registrata e citabile a mano, con lo stato
+«non indicizzata» e il motivo scritto accanto.
+
+### La ricerca su richiesta
+
+`Cerca fonti`, nella scheda Fonti, esegue la stessa ricerca dell'audit su tutti
+i capitoli del progetto. Serve quando la biblioteca cambia: si carica una
+specifica e si vuole sapere subito che cosa sostiene, senza rieseguire un audit
+intero. Le proposte già accettate o scartate **non** vengono toccate: rifare la
+ricerca non annulla il lavoro di chi ha già scelto.
 
 ### Technical Writer
 
@@ -78,8 +166,12 @@ interpretare:
 - dichiara il linguaggio dei blocchi di codice che non lo indicano, deducendolo
   dal contenuto;
 - annota il testo alternativo mancante sulle immagini, marcandolo da rivedere;
-- elenca **in coda** al documento le affermazioni prive di fonte, senza spezzare
-  la lettura.
+- elenca **in coda** al documento le fonti ufficiali trovate per le affermazioni
+  che ne erano prive, con l'URL già pronto da copiare, e separatamente quelle
+  per cui l'indice non ha nulla — senza spezzare la lettura.
+
+Il collegamento non viene inserito dentro la frase: dove collocare un rimando è
+una scelta editoriale, e spetta al revisore.
 
 Non riscrive frasi e non aggiunge contenuto tecnico: quello richiede un modello,
 e comunque l'approvazione umana. `preservesMeaning` è parte del contratto.
@@ -140,6 +232,9 @@ un'interruzione opaca.
 
 `npm test` copre: le regole di analisi Dataform una per una, il riconoscimento
 delle affermazioni, la distinzione fra fonti ufficiali e della comunità,
+l'integrità dell'indice (solo `https`, solo domini ufficiali, nessun doppione),
+il fatto che ogni URL proposto provenga dall'indice, che una frase fuori tema
+non produca proposte e che l'esito sia stabile a parità di testo,
 l'additività della revisione (l'originale non viene mai perduto), la stabilità
 dei diagrammi, la stabilità dell'hash rispetto all'ordine delle chiavi e la
 validità del PNG prodotto dal mock.
@@ -167,3 +262,77 @@ può toccare un volume pubblicato — per quello serve una nuova edizione.
 
 Non sono presenti in `agent_definitions`: verranno registrati dalla migration
 della Fase 8, con `implemented = false` finché non lo saranno davvero.
+
+---
+
+## 10. Ricerca di fonti sul web
+
+L'indice curato risponde alla domanda «quale pagina sostiene questa
+affermazione». La ricerca web risponde a un'altra: «su che cosa mi baso per
+scrivere questo manuale». Il pulsante **Cerca fonti sul web**, nella scheda
+Fonti, cerca materiale di riferimento e propone quello che ritiene utile.
+
+Aprire il web reintroduce però il rischio che l'indice chiuso evitava: un
+motore può riferire un indirizzo plausibile e inesistente, e in un manuale
+tecnico l'errore si scopre in stampa. La difesa non sta nel prompt — sta nella
+sequenza:
+
+| Passaggio | Chi lo fa | Che cosa garantisce |
+|---|---|---|
+| 1 · Si formula | `buildQueries` | Poche interrogazioni mirate, ricavate da titolo e capitoli. Non una per capitolo: sarebbero decine di chiamate e un elenco illeggibile |
+| 2 · Si cerca | `WebSearchProvider` | Restituisce indirizzi **grezzi e non verificati**: è ciò che un motore dichiara di aver trovato |
+| 3 · Si verifica | `verifyUrl` | **Ogni indirizzo viene aperto.** Chi non risponde cade qui e non arriva sotto gli occhi di nessuno. Il titolo mostrato è quello letto dalla pagina |
+| 4 · Si sceglie | `sourceDiscoveryAgent` | Seleziona fra ciò che è sopravvissuto, e motiva. Può solo scegliere, mai aggiungere |
+
+Fra il terzo e il quarto passaggio c'è un controllo in più: la selezione viene
+**ricondotta all'elenco verificato**. Se il modello restituisce un URL che non
+gli era stato dato, quella voce viene scartata e il fatto viene riferito. Non è
+una possibilità teorica, ed è il motivo per cui la risposta non viene creduta
+sulla parola.
+
+`verifyUrl` rifiuta inoltre gli indirizzi su rete interna — `localhost`,
+`127.x`, `10.x`, `192.168.x`, `169.254.x`: un indirizzo proposto da un modello
+non deve poter diventare una sonda sull'infrastruttura.
+
+### I motori disponibili
+
+| `AI_SEARCH_PROVIDER` | Modello atteso | Chiave | Costo |
+|---|---|---|---|
+| `mock` (predefinito) | — | nessuna | non cerca e non inventa |
+| `gemini` | `gemini-2.5-flash` | `GEMINI_API_KEY` | **quota gratuita giornaliera**, nessun conto da attivare |
+| `anthropic` | `claude-sonnet-5` | `ANTHROPIC_API_KEY` | a consumo, richiede credito |
+| `openai` | `gpt-5.6` | `OPENAI_API_KEY` | a consumo, richiede credito |
+
+Gemini è l'unico che cerca senza un conto con fatturazione attiva: la chiave si
+crea in un minuto su [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+Per un manuale — dove si cercano fonti a ondate, non di continuo — la quota
+giornaliera è ampiamente sufficiente.
+
+Il modello deve appartenere al fornitore. Cambiare l'uno dimenticando l'altro è
+una svista frequente e produrrebbe un errore oscuro dall'altra parte: il
+registro se ne accorge, usa il predefinito del fornitore e **lo dichiara**.
+
+Gli errori dei due fornitori vengono riportati per esteso, non ridotti al
+codice HTTP: «400» non permette di distinguere una chiave sbagliata da un
+credito esaurito, e costringe a indovinare. Il motivo lo scrivono sempre
+loro; il compito è riferirlo.
+
+### Che cosa succede senza chiave
+
+Con `AI_SEARCH_PROVIDER=mock` (predefinito) **non viene cercato nulla, e nulla
+viene inventato**: elenco vuoto e avviso esplicito. La tentazione sarebbe
+generare qualche risultato verosimile per mostrare l'interfaccia popolata, ma
+un elenco di fonti inventate è peggio di un elenco vuoto — perché sembra un
+risultato.
+
+### Dalla proposta alla fonte
+
+Le fonti trovate entrano in biblioteca con stato `proposed`: non vengono
+indicizzate e non partecipano alla ricerca finché qualcuno non le accetta.
+Accettandole parte l'indicizzazione, e da quel momento sono fonti del progetto
+come le altre. Fra il trovarle e l'usarle c'è sempre una persona.
+
+| Comando | Che cosa fa |
+|---|---|
+| **Cerca fonti sul web** | Va a cercare materiale nuovo per il manuale |
+| **Verifica affermazioni** | Collega le frasi prive di rimando a ciò che già si ha: documentazione ufficiale e biblioteca |

@@ -2210,3 +2210,389 @@ on conflict (key) do update
       description = excluded.description,
       is_visual   = excluded.is_visual,
       updated_at  = now();
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ▶ 20260809140001_source_research.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- =============================================================================
+-- 15 · Ricerca automatica delle fonti
+-- -----------------------------------------------------------------------------
+-- Le fonti che il Source Auditor trova nell'indice curato non sono citazioni:
+-- sono proposte. Vivono in una tabella distinta finché un revisore non le
+-- accetta, momento in cui diventano una riga di `citations`.
+--
+-- Tenerle separate ha una conseguenza precisa: `citations` continua a
+-- descrivere che cosa il capitolo cita davvero, senza mescolarvi ciò che la
+-- macchina suggerisce.
+-- =============================================================================
+
+create type source_suggestion_status as enum ('proposed', 'accepted', 'rejected');
+
+create table public.source_suggestions (
+  id               uuid primary key default gen_random_uuid(),
+  project_id       uuid not null references public.projects (id) on delete cascade,
+  organization_id  uuid not null references public.organizations (id) on delete cascade,
+  chapter_id       uuid not null references public.chapters (id) on delete cascade,
+  workflow_run_id  uuid references public.workflow_runs (id) on delete cascade,
+
+  -- L'affermazione da sostenere, così come si presentava al momento dell'audit.
+  claim_line       integer not null,
+  claim_excerpt    text not null,
+  category         text not null,
+
+  -- La pagina proposta, letta dall'indice: url e titolo non sono generati.
+  url              text not null,
+  title            text not null,
+  section          text,
+  score            numeric(8, 3) not null,
+  rank             integer not null,
+  -- I termini che hanno prodotto l'aggancio: è il motivo della proposta, ed è
+  -- ciò che il revisore legge per accettarla o scartarla.
+  matched_terms    text[] not null default '{}',
+
+  status           source_suggestion_status not null default 'proposed',
+  decided_by       uuid references auth.users (id) on delete set null,
+  decided_at       timestamptz,
+  created_at       timestamptz not null default now(),
+
+  constraint source_suggestions_url_https check (url ~* '^https://'),
+  constraint source_suggestions_rank_positive check (rank >= 1),
+  constraint source_suggestions_line_valid check (claim_line >= 0),
+  -- Una decisione ha sempre un momento; l'assenza di decisione non ne ha uno.
+  constraint source_suggestions_decision_coherent check (
+    (status = 'proposed' and decided_at is null)
+    or (status <> 'proposed' and decided_at is not null)
+  )
+);
+
+comment on table public.source_suggestions is
+  'Fonti ufficiali proposte automaticamente per le affermazioni prive di rimando. Una proposta non è una citazione finché un revisore non la accetta.';
+
+-- ---------------------------------------------------------------------------
+-- Indici
+-- ---------------------------------------------------------------------------
+create index source_suggestions_chapter_idx
+  on public.source_suggestions (chapter_id, claim_line, rank);
+create index source_suggestions_run_idx
+  on public.source_suggestions (workflow_run_id);
+create index source_suggestions_org_idx
+  on public.source_suggestions (organization_id);
+create index source_suggestions_project_idx
+  on public.source_suggestions (project_id, created_at desc);
+-- Le proposte ancora da decidere sono l'unico sottoinsieme interrogato spesso.
+create index source_suggestions_pending_idx
+  on public.source_suggestions (chapter_id)
+  where status = 'proposed';
+
+-- ---------------------------------------------------------------------------
+-- Row Level Security: la stessa regola delle altre tabelle editoriali
+-- ---------------------------------------------------------------------------
+alter table public.source_suggestions enable row level security;
+alter table public.source_suggestions force row level security;
+
+create policy source_suggestions_select_member on public.source_suggestions
+  for select to authenticated using (public.is_org_member(organization_id));
+
+create policy source_suggestions_insert_member on public.source_suggestions
+  for insert to authenticated with check (public.is_org_member(organization_id));
+
+create policy source_suggestions_update_member on public.source_suggestions
+  for update to authenticated
+  using (public.is_org_member(organization_id))
+  with check (public.is_org_member(organization_id));
+
+create policy source_suggestions_delete_member on public.source_suggestions
+  for delete to authenticated using (public.is_org_member(organization_id));
+
+-- ---------------------------------------------------------------------------
+-- Citazioni: distinguere «verificata» da «mai controllata»
+-- ---------------------------------------------------------------------------
+-- `is_reachable` resta nullo per ciò che non è stato interrogato: un controllo
+-- contro l'indice curato non è una chiamata HTTP, e dichiararlo tale sarebbe
+-- una piccola bugia con conseguenze pratiche.
+comment on column public.citations.is_reachable is
+  'Vero se la pagina risulta nell''indice curato delle fonti ufficiali. Nullo se non è stata controllata.';
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ▶ 20260809140002_reference_library.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- =============================================================================
+-- 16 · Biblioteca delle fonti
+-- -----------------------------------------------------------------------------
+-- L'indice ufficiale copre la documentazione del produttore. Un manuale però si
+-- appoggia anche ad altro: una specifica in PDF, un articolo, una pagina interna.
+-- Questa migration dà a quel materiale lo stesso trattamento — viene indicizzato
+-- e la ricerca automatica lo propone — senza confonderlo con la documentazione
+-- ufficiale: l'origine resta scritta su ogni proposta.
+--
+-- Ereditarietà: una fonte con `project_id` nullo appartiene all'organizzazione e
+-- vale per tutti i suoi progetti; una con `project_id` valorizzato riguarda quel
+-- volume soltanto. È lo schema già adottato per le collane.
+-- =============================================================================
+
+create type reference_kind as enum ('link', 'pdf');
+create type reference_scope as enum ('organization', 'project');
+create type reference_status as enum ('pending', 'indexing', 'indexed', 'failed');
+
+-- Da dove viene una fonte proposta. Il lettore ha diritto di saperlo.
+create type source_origin as enum ('catalogo_ufficiale', 'biblioteca');
+
+-- ---------------------------------------------------------------------------
+-- reference_sources
+-- ---------------------------------------------------------------------------
+create table public.reference_sources (
+  id                 uuid primary key default gen_random_uuid(),
+  organization_id    uuid not null references public.organizations (id) on delete cascade,
+  -- Nullo: fonte dell'organizzazione, ereditata da tutti i progetti.
+  project_id         uuid references public.projects (id) on delete cascade,
+
+  kind               reference_kind not null,
+  scope              reference_scope not null,
+
+  title              text not null,
+  url                text,
+  storage_path       text,
+  original_filename  text,
+  byte_size          bigint,
+  publisher          text,
+  note               text,
+
+  -- L'autore dichiara che questa fonte vale quanto la documentazione ufficiale
+  -- (una specifica, una norma). Non lo decide il sistema: lo decide chi scrive.
+  is_authoritative   boolean not null default false,
+
+  status             reference_status not null default 'pending',
+  error_message      text,
+  chunk_count        integer not null default 0,
+  page_count         integer,
+  indexed_at         timestamptz,
+
+  created_by         uuid references auth.users (id) on delete set null,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now(),
+
+  constraint reference_sources_scope_coherent check (
+    (scope = 'organization' and project_id is null)
+    or (scope = 'project' and project_id is not null)
+  ),
+  -- Un link ha un indirizzo, un PDF ha un file. Mai il contrario, mai entrambi.
+  constraint reference_sources_target_coherent check (
+    (kind = 'link' and url is not null and storage_path is null)
+    or (kind = 'pdf' and storage_path is not null and url is null)
+  ),
+  constraint reference_sources_url_scheme check (url is null or url ~* '^https?://'),
+  constraint reference_sources_title_present check (length(btrim(title)) > 0),
+  constraint reference_sources_chunk_count check (chunk_count >= 0)
+);
+
+comment on table public.reference_sources is
+  'Fonti aggiunte a mano — link e PDF — indicizzate e proposte dalla ricerca automatica accanto alla documentazione ufficiale.';
+
+create trigger reference_sources_set_updated_at
+  before update on public.reference_sources
+  for each row execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- reference_chunks
+-- ---------------------------------------------------------------------------
+-- Il testo indicizzabile, spezzato in blocchi. Per un PDF il blocco porta il
+-- numero di pagina: una proposta può così indicare dove guardare, invece di
+-- rimandare a un documento di duecento pagine.
+create table public.reference_chunks (
+  id               uuid primary key default gen_random_uuid(),
+  reference_id     uuid not null references public.reference_sources (id) on delete cascade,
+  organization_id  uuid not null references public.organizations (id) on delete cascade,
+  project_id       uuid references public.projects (id) on delete cascade,
+
+  chunk_index      integer not null,
+  page             integer,
+  heading          text,
+  content          text not null,
+  -- Termini canonici precalcolati: la ricerca non deve ri-tokenizzare a ogni giro.
+  terms            text[] not null default '{}',
+
+  created_at       timestamptz not null default now(),
+
+  constraint reference_chunks_index_positive check (chunk_index >= 0),
+  constraint reference_chunks_page_positive check (page is null or page >= 1),
+  unique (reference_id, chunk_index)
+);
+
+comment on table public.reference_chunks is
+  'Testo indicizzabile delle fonti della biblioteca, con il numero di pagina quando la fonte è un PDF.';
+
+-- ---------------------------------------------------------------------------
+-- Indici
+-- ---------------------------------------------------------------------------
+create index reference_sources_org_idx
+  on public.reference_sources (organization_id, created_at desc);
+create index reference_sources_project_idx
+  on public.reference_sources (project_id, created_at desc);
+-- Le fonti dell'organizzazione sono lette a ogni ricerca su ogni progetto.
+create index reference_sources_inherited_idx
+  on public.reference_sources (organization_id)
+  where project_id is null;
+create index reference_sources_status_idx
+  on public.reference_sources (status)
+  where status <> 'indexed';
+
+create index reference_chunks_reference_idx
+  on public.reference_chunks (reference_id, chunk_index);
+create index reference_chunks_org_idx on public.reference_chunks (organization_id);
+create index reference_chunks_project_idx on public.reference_chunks (project_id);
+create index reference_chunks_terms_idx on public.reference_chunks using gin (terms);
+
+-- ---------------------------------------------------------------------------
+-- Row Level Security
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['reference_sources', 'reference_chunks'] loop
+    execute format('alter table public.%I enable row level security', t);
+    execute format('alter table public.%I force row level security', t);
+
+    execute format(
+      'create policy %I on public.%I for select to authenticated using (public.is_org_member(organization_id))',
+      t || '_select_member', t
+    );
+    execute format(
+      'create policy %I on public.%I for insert to authenticated with check (public.is_org_member(organization_id))',
+      t || '_insert_member', t
+    );
+    execute format(
+      'create policy %I on public.%I for update to authenticated using (public.is_org_member(organization_id)) with check (public.is_org_member(organization_id))',
+      t || '_update_member', t
+    );
+    execute format(
+      'create policy %I on public.%I for delete to authenticated using (public.is_org_member(organization_id))',
+      t || '_delete_member', t
+    );
+  end loop;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Le proposte dichiarano da dove vengono
+-- ---------------------------------------------------------------------------
+alter table public.source_suggestions
+  add column origin source_origin not null default 'catalogo_ufficiale',
+  add column reference_id uuid references public.reference_sources (id) on delete cascade,
+  add column page integer;
+
+-- Un PDF caricato non ha un indirizzo pubblico: la proposta lo identifica con
+-- la fonte e la pagina. L'URL smette quindi di essere obbligatorio, ma qualcosa
+-- che identifichi la fonte deve esserci sempre.
+alter table public.source_suggestions alter column url drop not null;
+alter table public.source_suggestions drop constraint source_suggestions_url_https;
+
+alter table public.source_suggestions
+  add constraint source_suggestions_url_https check (url is null or url ~* '^https://'),
+  add constraint source_suggestions_identifiable check (url is not null or reference_id is not null),
+  -- Una proposta viene dal catalogo ufficiale oppure dalla biblioteca: nel primo
+  -- caso non ha una fonte di progetto alle spalle, nel secondo ce l'ha sempre.
+  add constraint source_suggestions_origin_coherent check (
+    (origin = 'catalogo_ufficiale' and reference_id is null)
+    or (origin = 'biblioteca' and reference_id is not null)
+  ),
+  add constraint source_suggestions_page_positive check (page is null or page >= 1);
+
+create index source_suggestions_reference_idx
+  on public.source_suggestions (reference_id)
+  where reference_id is not null;
+
+-- ---------------------------------------------------------------------------
+-- Storage: il bucket delle sorgenti accoglie anche i PDF di riferimento
+-- ---------------------------------------------------------------------------
+update storage.buckets
+   set allowed_mime_types = array[
+     'application/zip',
+     'application/x-zip-compressed',
+     'application/octet-stream',
+     'application/pdf'
+   ]
+ where id = 'project-sources';
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ▶ 20260809140003_reference_proposed.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- =============================================================================
+-- 17 · Stato «proposta» per le fonti
+-- -----------------------------------------------------------------------------
+-- File a sé per necessità: PostgreSQL non consente di usare un valore di enum
+-- nella stessa transazione in cui viene aggiunto con ALTER TYPE ... ADD VALUE.
+-- Il valore entra qui; la migration 18 lo impiega.
+--
+-- La ricerca web propone; l'autore dispone. Una fonte trovata automaticamente
+-- entra in biblioteca come `proposed` e non viene indicizzata: resta un
+-- suggerimento finché qualcuno non la accetta.
+-- =============================================================================
+
+alter type reference_status add value if not exists 'proposed';
+
+-- ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+--
+--   ⚠  INTERRUZIONE OBBLIGATORIA — SOLO PER L'SQL EDITOR
+--
+--   Se stai incollando questo file nell'SQL Editor di Supabase, fermati qui:
+--   esegui tutto ciò che precede, attendi il completamento, poi esegui
+--   separatamente ciò che segue.
+--
+--   Motivo: PostgreSQL non permette di usare un valore di enum nella stessa
+--   transazione in cui viene aggiunto con ALTER TYPE ... ADD VALUE.
+--
+--   Con `npx supabase db push` questa interruzione non serve: ogni migration
+--   è già una transazione a sé.
+--
+-- ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ▶ 20260809140004_web_discovery.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- =============================================================================
+-- 18 · Fonti trovate sul web
+-- -----------------------------------------------------------------------------
+-- Riusare `reference_sources` invece di una tabella a parte è deliberato: una
+-- fonte accettata non deve essere copiata da qualche parte, deve solo cambiare
+-- stato. Meno passaggi, meno occasioni di divergenza.
+--
+-- Impiega lo stato `proposed` introdotto dalla migration 17.
+-- =============================================================================
+
+-- Come è entrata in biblioteca. Serve a distinguere ciò che l'autore ha scelto
+-- da ciò che gli è stato proposto: la fiducia da accordare non è la stessa.
+create type reference_added_by as enum ('manuale', 'ricerca_web');
+
+alter table public.reference_sources
+  add column added_by         reference_added_by not null default 'manuale',
+  -- Perché questa fonte servirebbe a questo manuale. È ciò che il revisore
+  -- legge per decidere: senza motivazione una proposta è solo un URL in più.
+  add column rationale        text,
+  -- L'interrogazione che l'ha fatta emergere: rende la proposta rintracciabile.
+  add column discovery_query  text,
+  add column web_kind         text,
+  add column priority         integer,
+  -- Che cosa ha risposto la pagina quando è stata aperta, e quando.
+  add column http_status      integer,
+  add column verified_at      timestamptz;
+
+alter table public.reference_sources
+  add constraint reference_sources_priority_range
+    check (priority is null or priority between 1 and 3),
+  -- Una proposta arriva sempre da una ricerca, e porta con sé il perché.
+  add constraint reference_sources_proposal_coherent check (
+    added_by = 'manuale' or (rationale is not null and discovery_query is not null)
+  );
+
+comment on column public.reference_sources.added_by is
+  'manuale: aggiunta dall''autore. ricerca_web: proposta dalla ricerca automatica, da accettare.';
+
+-- Le proposte in attesa sono l'unico sottoinsieme interrogato di continuo.
+create index reference_sources_proposed_idx
+  on public.reference_sources (project_id, priority, created_at desc)
+  where status = 'proposed';

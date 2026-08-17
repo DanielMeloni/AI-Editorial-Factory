@@ -25,6 +25,7 @@
     "db:diff": "supabase db diff",
     "db:types": "supabase gen types typescript --local > src/lib/supabase/database.types.ts",
     "db:bundle": "node scripts/build-sql-bundle.mjs",
+    "sources:refresh": "node scripts/refresh-source-catalog.mjs",
     "check:env": "node scripts/check-env.mjs",
     "test:smoke": "node scripts/smoke.mjs"
   },
@@ -52,6 +53,7 @@
     "tailwind-merge": "3.6.0",
     "unified": "11.0.5",
     "unist-util-visit": "5.0.0",
+    "unpdf": "1.8.1",
     "workflow": "4.8.1",
     "zod": "4.4.3"
   },

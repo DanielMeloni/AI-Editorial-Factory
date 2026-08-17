@@ -22,7 +22,7 @@ npm run db:types              # genera src/lib/supabase/database.types.ts
 Le migration sono **additive e ordinate per timestamp**. Non modificarne una già
 applicata: aggiungerne una nuova.
 
-## 2. Le quattordici migration
+## 2. Le diciotto migration
 
 | File | Contenuto |
 |---|---|
@@ -40,6 +40,10 @@ applicata: aggiungerne una nuova.
 | `…0012_seed_agents.sql` | Catalogo dei dodici agenti |
 | `…130001_series.sql` | **Collane editoriali**: 17 tabelle, RLS, vincoli, indici *(fondamenta della Fase 8)* |
 | `…130002_series_agents.sql` | Catalogo dei sei agenti di collana |
+| `…140001_source_research.sql` | `source_suggestions`: le fonti proposte automaticamente, con RLS e indici |
+| `…140002_reference_library.sql` | `reference_sources`, `reference_chunks`: la biblioteca di link e PDF, indicizzata |
+| `…140003_reference_proposed.sql` | Stato `proposed`, in una transazione a sé come impone `ALTER TYPE … ADD VALUE` |
+| `…140004_web_discovery.sql` | Provenienza, motivazione ed esito della verifica sulle fonti trovate sul web |
 
 ## 3. Il modello in breve
 
@@ -232,3 +236,56 @@ poi divergono senza che alcun vincolo se ne accorga. Un test lo impone:
 proprietà: presenza e RLS delle diciassette tabelle, **assenza** delle colonne su
 `projects`, ogni vincolo elencato sopra, e l'isolamento fra organizzazioni su
 collane, volumi, regole, deroghe, glossario e riferimenti incrociati.
+
+---
+
+## 12. Fonti proposte (migration 15)
+
+`source_suggestions` tiene le pagine ufficiali che il Source Auditor propone per
+le affermazioni prive di rimando. È una tabella distinta da `citations`, e la
+distinzione è sostanziale: `citations` descrive che cosa il capitolo cita
+davvero, `source_suggestions` che cosa la macchina suggerisce di citare. Una
+proposta diventa una citazione solo quando un revisore la accetta.
+
+| Colonna | Perché c'è |
+|---|---|
+| `claim_line`, `claim_excerpt`, `category` | L'affermazione com'era al momento dell'audit: la proposta resta leggibile anche se il testo cambia |
+| `url`, `title`, `section` | Letti dall'indice curato, non generati |
+| `score`, `rank`, `matched_terms` | Il **motivo** della proposta: è ciò che il revisore guarda per accettarla o scartarla |
+| `status`, `decided_by`, `decided_at` | La decisione umana, con un vincolo che impedisce una decisione senza data |
+
+Su `citations`, `is_reachable` significa ora «risulta nell'indice curato» e resta
+**nullo** per ciò che non è stato controllato: un confronto con l'indice non è
+una chiamata HTTP, e dichiararlo tale sarebbe una piccola bugia con conseguenze
+pratiche.
+
+---
+
+## 13. La biblioteca delle fonti (migration 16)
+
+`reference_sources` tiene i link e i PDF aggiunti a mano; `reference_chunks` il
+loro testo indicizzabile, un blocco per volta, con il numero di pagina quando la
+fonte è un PDF.
+
+L'ereditarietà è quella delle collane: `project_id` nullo significa «fonte
+dell'organizzazione», valida per tutti i suoi progetti. Il vincolo
+`reference_sources_scope_coherent` impedisce lo stato ambiguo — dichiararla di
+organizzazione e legarla a un progetto — perché una fonte del genere sarebbe
+ereditata da tutti ma appartenente a uno solo.
+
+| Vincolo | Che cosa impedisce |
+|---|---|
+| `reference_sources_target_coherent` | Un link senza indirizzo, un PDF senza file, o una fonte che è entrambi |
+| `reference_sources_scope_coherent` | Fonte di organizzazione legata a un progetto, o di progetto senza progetto |
+| `reference_sources_title_present` | Un titolo vuoto: renderebbe l'elenco illeggibile |
+| `source_suggestions_origin_coherent` | Una proposta «dalla biblioteca» senza una fonte alle spalle |
+| `source_suggestions_identifiable` | Una proposta senza indirizzo **né** fonte: sarebbe irrintracciabile |
+| `reference_chunks` unique `(reference_id, chunk_index)` | Due blocchi con lo stesso indice sullo stesso documento |
+
+Il bucket `project-sources` accoglie ora anche `application/pdf`: i PDF di
+riferimento stanno accanto agli archivi, sotto la stessa convenzione di percorso
+`{organization_id}/{project_id}/references/{reference_id}/`, e quindi sotto le
+stesse policy di storage.
+
+`tests/db/reference-library.test.ts` verifica ogni vincolo su PostgreSQL reale,
+oltre all'isolamento fra organizzazioni su fonti e blocchi.

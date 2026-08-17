@@ -9,6 +9,8 @@ import {
   visualPlanAgent,
 } from '@/lib/agents/definitions';
 import { analyzeMarkdown } from '@/lib/ingest/markdown';
+import { buildProjectIndex } from '@/lib/sources/library';
+import { mergeSuggestions, researchClaims } from '@/lib/sources/research';
 import { extractConfigBlock } from '@/lib/agents/analysis/dataform';
 import { buildDependencyDag } from '@/lib/visual/mermaid-dag';
 import type {
@@ -16,7 +18,9 @@ import type {
   Issue,
   RevisionOutput,
   SourceAuditOutput,
+  SourceSuggestion,
   TechnicalVerifierOutput,
+  VerifiableClaim,
   VisualPlanOutput,
 } from '@/lib/agents/schemas';
 
@@ -134,16 +138,21 @@ export async function verifyTechnical(
 }
 
 // ---------------------------------------------------------------------------
-// 3 · Verifica dei riferimenti
+// 3 · Verifica dei riferimenti e ricerca automatica delle fonti mancanti
 // ---------------------------------------------------------------------------
 
+/**
+ * Riceve le affermazioni individuate al passaggio precedente: senza di esse
+ * potrebbe giudicare le fonti presenti, ma non cercare quelle che mancano.
+ */
 export async function auditSources(
   context: RunContext,
   chapter: ChapterInput,
+  claims: VerifiableClaim[],
 ): Promise<SourceAuditOutput> {
   'use step';
 
-  const result = await runAgent(sourceAuditorAgent, chapter, {
+  const result = await runAgent(sourceAuditorAgent, { ...chapter, claims }, {
     db: createAdminClient(),
     organizationId: context.organizationId,
     projectId: context.projectId,
@@ -156,6 +165,48 @@ export async function auditSources(
 }
 
 // ---------------------------------------------------------------------------
+// 3-bis · Biblioteca del progetto
+// ---------------------------------------------------------------------------
+
+/**
+ * Aggiunge alle proposte le fonti che l'autore ha caricato: link e PDF.
+ *
+ * È un passaggio a sé perché l'agente resta puro — interroga la sola
+ * documentazione ufficiale e non tocca il database — mentre la biblioteca vive
+ * nelle tabelle del progetto. Le due ricerche usano lo stesso indice costruito
+ * insieme, quindi i punteggi restano confrontabili e l'ordine dei candidati
+ * significa qualcosa.
+ */
+export async function enrichWithLibrary(
+  context: RunContext,
+  claims: VerifiableClaim[],
+  suggestions: SourceSuggestion[],
+): Promise<{ suggestions: SourceSuggestion[]; unmatched: number; libraryEntries: number }> {
+  'use step';
+
+  const db = createAdminClient();
+  const { index, libraryEntries } = await buildProjectIndex(
+    db,
+    context.organizationId,
+    context.projectId,
+  );
+
+  // Nessuna fonte caricata: non c'è nulla da aggiungere, e ricalcolare
+  // sull'indice ufficiale darebbe esattamente ciò che si ha già.
+  if (libraryEntries === 0) {
+    return { suggestions, unmatched: 0, libraryEntries: 0 };
+  }
+
+  const research = researchClaims(claims, index);
+
+  return {
+    suggestions: mergeSuggestions(suggestions, research.suggestions),
+    unmatched: research.unmatched,
+    libraryEntries,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 4 · Persistenza dell'audit
 // ---------------------------------------------------------------------------
 
@@ -163,7 +214,8 @@ export async function persistAudit(
   context: RunContext,
   technical: TechnicalVerifierOutput,
   sources: SourceAuditOutput,
-): Promise<{ issueCount: number; critical: number; high: number }> {
+  suggestions: SourceSuggestion[],
+): Promise<{ issueCount: number; critical: number; high: number; suggestions: number }> {
   'use step';
 
   const db = createAdminClient();
@@ -197,24 +249,60 @@ export async function persistAudit(
   // Le citazioni diventano righe consultabili e ricontrollabili nel tempo.
   await db.from('citations').delete().eq('chapter_id', context.chapterId);
   if (sources.citations.length > 0) {
+    const now = new Date().toISOString();
     await db.from('citations').insert(
       sources.citations.map((citation) => ({
         project_id: context.projectId,
         organization_id: context.organizationId,
         chapter_id: context.chapterId,
         url: citation.url,
-        title: citation.text || null,
+        title: citation.indexedTitle ?? citation.text ?? null,
         publisher: citation.domain || null,
         is_official: citation.isOfficial,
         note: citation.note,
+        // Il controllo è avvenuto contro l'indice curato, non con una chiamata
+        // HTTP: `is_reachable` resta nullo per ciò che non è stato interrogato.
+        is_reachable: citation.inIndex ? true : null,
+        last_checked_at: now,
       })),
     );
+  }
+
+  // Le fonti proposte restano righe distinte: una proposta non è una citazione
+  // finché qualcuno non l'accetta.
+  await db.from('source_suggestions').delete().eq('workflow_run_id', context.workflowRunId);
+
+  const suggestionRows = suggestions.flatMap((suggestion) =>
+    suggestion.candidates.map((candidate, index) => ({
+      project_id: context.projectId,
+      organization_id: context.organizationId,
+      chapter_id: context.chapterId,
+      workflow_run_id: context.workflowRunId,
+      claim_line: suggestion.line,
+      claim_excerpt: suggestion.statement,
+      category: suggestion.category,
+      url: candidate.url,
+      title: candidate.title,
+      section: candidate.section,
+      score: candidate.score,
+      rank: index + 1,
+      matched_terms: candidate.matchedTerms,
+      origin: candidate.origin,
+      reference_id: candidate.referenceId,
+      page: candidate.page,
+      status: 'proposed',
+    })),
+  );
+
+  for (let i = 0; i < suggestionRows.length; i += 100) {
+    await db.from('source_suggestions').insert(suggestionRows.slice(i, i + 100));
   }
 
   return {
     issueCount: issues.length,
     critical: issues.filter((i) => i.severity === 'critical').length,
     high: issues.filter((i) => i.severity === 'high').length,
+    suggestions: suggestions.length,
   };
 }
 
@@ -226,6 +314,7 @@ export async function proposeRevision(
   context: RunContext,
   chapter: ChapterInput,
   issues: Issue[],
+  suggestions: SourceSuggestion[],
   baseVersionId: string,
 ): Promise<{ versionId: string | null; changeCount: number; summary: string }> {
   'use step';
@@ -234,7 +323,7 @@ export async function proposeRevision(
 
   const result = await runAgent(
     technicalWriterAgent,
-    { ...chapter, issues },
+    { ...chapter, issues, suggestions },
     {
       db,
       organizationId: context.organizationId,

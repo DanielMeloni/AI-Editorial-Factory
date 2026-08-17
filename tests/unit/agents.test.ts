@@ -66,6 +66,9 @@ function toInput(markdown: string): ChapterInput {
 
 const input = toInput(CAPITOLO_11);
 
+/** Le affermazioni che il Technical Verifier consegna al Source Auditor. */
+const claims = technicalVerifierAgent.deterministic!(input).claims;
+
 describe('Technical Verifier', () => {
   const output = technicalVerifierAgent.deterministic!(input);
 
@@ -104,7 +107,7 @@ describe('Technical Verifier', () => {
 });
 
 describe('Source Auditor', () => {
-  const output = sourceAuditorAgent.deterministic!(input);
+  const output = sourceAuditorAgent.deterministic!({ ...input, claims });
 
   it('distingue la documentazione ufficiale dalle fonti della comunità', () => {
     const ufficiale = output.citations.find((c) => c.domain === 'cloud.google.com');
@@ -120,14 +123,22 @@ describe('Source Auditor', () => {
   });
 
   it('segnala il capitolo privo di qualsiasi riferimento', () => {
-    const senzaFonti = sourceAuditorAgent.deterministic!(toInput('# Titolo\n\nTesto senza link.\n'));
+    const senzaFonti = sourceAuditorAgent.deterministic!({
+      ...toInput('# Titolo\n\nTesto senza link.\n'),
+      claims: [],
+    });
     expect(senzaFonti.issues.some((i) => i.title === 'Nessun riferimento esterno')).toBe(true);
   });
 });
 
 describe('Technical Writer', () => {
   const verifica = technicalVerifierAgent.deterministic!(input);
-  const revisione = technicalWriterAgent.deterministic!({ ...input, issues: verifica.issues });
+  const audit = sourceAuditorAgent.deterministic!({ ...input, claims });
+  const revisione = technicalWriterAgent.deterministic!({
+    ...input,
+    issues: verifica.issues,
+    suggestions: audit.suggestions,
+  });
 
   it('produce un output conforme al proprio contratto', () => {
     expect(technicalWriterAgent.outputSchema.safeParse(revisione).success).toBe(true);
@@ -147,9 +158,34 @@ describe('Technical Writer', () => {
     expect(revisione.contentMd).toContain('![Figura 11]');
   });
 
-  it('elenca in coda le affermazioni da corredare di fonte', () => {
-    expect(revisione.changes.some((c) => c.kind === 'nota_verifica')).toBe(true);
-    expect(revisione.contentMd).toContain('[!NOTE]');
+  it('elenca in coda le fonti ufficiali trovate per le affermazioni scoperte', () => {
+    expect(revisione.changes.some((c) => c.kind === 'fonte_proposta')).toBe(true);
+    expect(revisione.contentMd).toContain('[!TIP]');
+    // Il collegamento proposto è pronto da copiare, ma resta in coda: spostarlo
+    // dentro la frase è una scelta editoriale, e spetta al revisore.
+    expect(revisione.contentMd).toContain('https://docs.cloud.google.com/dataform/docs/create-tables');
+  });
+
+  it('tiene separate le affermazioni per cui l’indice non ha nulla', () => {
+    const senzaProposta = technicalWriterAgent.deterministic!({
+      ...input,
+      issues: [
+        {
+          kind: 'source',
+          severity: 'low',
+          title: 'Affermazione senza fonte',
+          detail: 'Nessuna fonte.',
+          suggestion: null,
+          location: { line: 400, heading: null, excerpt: 'Affermazione senza riscontro nell’indice.' },
+          evidence: [],
+        },
+      ],
+      suggestions: [],
+    });
+
+    expect(senzaProposta.changes.some((c) => c.kind === 'nota_verifica')).toBe(true);
+    expect(senzaProposta.contentMd).toContain('[!NOTE]');
+    expect(senzaProposta.contentMd).not.toContain('[!TIP]');
   });
 
   it('conserva integralmente il testo originale', () => {
@@ -160,7 +196,7 @@ describe('Technical Writer', () => {
 
   it('non propone nulla su un capitolo già in ordine', () => {
     const pulito = toInput('# Titolo\n\n```sql\nselect 1;\n```\n\n![Descrizione](a.png)\n');
-    const esito = technicalWriterAgent.deterministic!({ ...pulito, issues: [] });
+    const esito = technicalWriterAgent.deterministic!({ ...pulito, issues: [], suggestions: [] });
     expect(esito.changes).toEqual([]);
   });
 });

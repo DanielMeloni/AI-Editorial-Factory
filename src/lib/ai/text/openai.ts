@@ -52,6 +52,8 @@ export class OpenAITextProvider implements TextProvider {
         `OpenAI ha risposto ${response.status}.`,
         retryable,
         this.name,
+        undefined,
+        response.status,
       );
     }
 

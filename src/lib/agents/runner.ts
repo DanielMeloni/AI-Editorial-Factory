@@ -78,7 +78,7 @@ export async function runAgent<I, O>(
   const input = parsedInput.data;
   const inputHash = await hashInput(input);
 
-  const { provider, degraded } = getTextProvider();
+  const { provider, degraded } = getTextProvider(agent.key);
   const warnings: string[] = degraded ? [degraded] : [];
 
   // In modalità mock l'implementazione deterministica è quella preferita:
@@ -116,6 +116,8 @@ export async function runAgent<I, O>(
     let inputTokens = 0;
     let outputTokens = 0;
     let estimatedCostUsd = 0;
+    let effectiveProvider = provider.name;
+    let effectiveModel = provider.model;
 
     if (useDeterministic) {
       output = agent.deterministic!(input);
@@ -132,6 +134,8 @@ export async function runAgent<I, O>(
       inputTokens = result.usage.inputTokens;
       outputTokens = result.usage.outputTokens;
       estimatedCostUsd = result.estimatedCostUsd;
+      effectiveProvider = result.provider;
+      effectiveModel = result.model;
       warnings.push(...result.warnings);
     }
 
@@ -165,6 +169,8 @@ export async function runAgent<I, O>(
           input_tokens: inputTokens,
           output_tokens: outputTokens,
           estimated_cost_usd: estimatedCostUsd,
+          provider: useDeterministic ? 'deterministic' : effectiveProvider,
+          model: useDeterministic ? `${agent.key}@${agent.version}` : effectiveModel,
           duration_ms: durationMs,
           finished_at: new Date().toISOString(),
         })
@@ -176,8 +182,8 @@ export async function runAgent<I, O>(
         organization_id: context.organizationId,
         project_id: context.projectId,
         agent_run_id: agentRunId,
-        provider: useDeterministic ? 'deterministic' : provider.name,
-        model: useDeterministic ? `${agent.key}@${agent.version}` : provider.model,
+        provider: useDeterministic ? 'deterministic' : effectiveProvider,
+        model: useDeterministic ? `${agent.key}@${agent.version}` : effectiveModel,
         kind: 'text',
         input_tokens: inputTokens,
         output_tokens: outputTokens,
@@ -188,8 +194,8 @@ export async function runAgent<I, O>(
     return {
       output: parsedOutput.data,
       agentRunId,
-      provider: useDeterministic ? 'deterministic' : provider.name,
-      model: useDeterministic ? `${agent.key}@${agent.version}` : provider.model,
+      provider: useDeterministic ? 'deterministic' : effectiveProvider,
+      model: useDeterministic ? `${agent.key}@${agent.version}` : effectiveModel,
       usedModel: !useDeterministic,
       warnings,
       estimatedCostUsd,

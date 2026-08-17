@@ -2,17 +2,27 @@ import { z } from 'zod';
 import { analyzeCodeBlocks } from './analysis/dataform';
 import { extractClaims } from './analysis/claims';
 import { assessCitation } from './analysis/sources';
+import { CATALOG_ENTRIES } from '@/lib/sources/catalog';
+import { findSources, OFFICIAL_INDEX } from '@/lib/sources/match';
+import { researchClaims } from '@/lib/sources/research';
 import {
   chapterInputSchema,
   issueSchema,
   revisionOutputSchema,
   sourceAuditOutputSchema,
+  sourceDiscoveryInputSchema,
+  sourceDiscoveryOutputSchema,
+  sourceSuggestionSchema,
   technicalVerifierOutputSchema,
+  verifiableClaimSchema,
   visualPlanOutputSchema,
   type ChapterInput,
   type Issue,
   type RevisionOutput,
   type SourceAuditOutput,
+  type SourceDiscoveryInput,
+  type SourceDiscoveryOutput,
+  type SourceSuggestion,
   type TechnicalVerifierOutput,
   type VisualPlanOutput,
 } from './schemas';
@@ -131,16 +141,28 @@ export const technicalVerifierAgent: AgentDefinition<ChapterInput, TechnicalVeri
 // Source Auditor
 // ===========================================================================
 
-export const sourceAuditorAgent: AgentDefinition<ChapterInput, SourceAuditOutput> = {
+/**
+ * Il Source Auditor riceve anche le affermazioni individuate dal Technical
+ * Verifier: senza di esse potrebbe giudicare le fonti presenti, ma non cercare
+ * quelle che mancano.
+ */
+export const sourceAuditorInputSchema = chapterInputSchema.extend({
+  claims: z.array(verifiableClaimSchema).max(200),
+});
+export type SourceAuditorInput = z.infer<typeof sourceAuditorInputSchema>;
+
+export const sourceAuditorAgent: AgentDefinition<SourceAuditorInput, SourceAuditOutput> = {
   key: 'source_auditor',
   name: 'Source Auditor',
-  version: 1,
-  promptVersion: 'v1',
-  inputSchema: chapterInputSchema,
+  version: 2,
+  promptVersion: 'v2',
+  inputSchema: sourceAuditorInputSchema,
   outputSchema: sourceAuditOutputSchema,
   system:
-    'Verifichi completezza e autorevolezza dei riferimenti di un manuale tecnico. ' +
-    'Distingui la documentazione ufficiale del produttore dalle fonti della comunità. Rispondi in italiano.',
+    'Verifichi completezza e autorevolezza dei riferimenti di un manuale tecnico e proponi la ' +
+    'pagina ufficiale che sostiene ogni affermazione priva di fonte. Distingui la documentazione ' +
+    'ufficiale del produttore dalle fonti della comunità. Non citare mai un URL che non ti è ' +
+    'stato fornito nell’elenco delle pagine disponibili. Rispondi in italiano.',
 
   buildPrompt: (input) =>
     [
@@ -148,13 +170,24 @@ export const sourceAuditorAgent: AgentDefinition<ChapterInput, SourceAuditOutput
       '',
       'Collegamenti presenti:',
       ...input.links.map((link) => `- riga ${link.line}: [${link.text}](${link.url})`),
+      '',
+      'Affermazioni prive di fonte:',
+      ...input.claims
+        .filter((claim) => !claim.hasSupportingSource)
+        .map((claim) => `- riga ${claim.line} [${claim.category}]: ${claim.statement}`),
+      '',
+      'Pagine ufficiali disponibili — scegli soltanto fra queste:',
+      ...CATALOG_ENTRIES.map((entry) => `- ${entry.url} — ${entry.title} (${entry.section})`),
     ].join('\n'),
 
   deterministic: (input) => {
     const citations = input.links.map(assessCitation);
     const issues: Issue[] = [];
 
+    // 1. Autorevolezza e validità dei riferimenti già presenti.
     for (const citation of citations.filter((c) => !c.isOfficial)) {
+      const alternative = citation.domain === '' ? [] : findSources(citation.text, { limit: 1 });
+
       issues.push({
         kind: 'source',
         severity: citation.domain === '' ? 'high' : 'low',
@@ -163,7 +196,25 @@ export const sourceAuditorAgent: AgentDefinition<ChapterInput, SourceAuditOutput
         suggestion:
           citation.domain === ''
             ? 'Correggere l’URL.'
-            : 'Affiancare o sostituire con la documentazione ufficiale del prodotto.',
+            : alternative.length > 0
+              ? `Affiancare o sostituire con la documentazione ufficiale: ${alternative[0]!.title} — ${alternative[0]!.url ?? ''}`
+              : 'Affiancare o sostituire con la documentazione ufficiale del prodotto.',
+        location: { line: citation.line, heading: headingAbove(input, citation.line), excerpt: citation.url },
+        evidence: [citation.url],
+      });
+    }
+
+    // 2. Riferimento ufficiale che l'indice non conosce: la documentazione viene
+    //    riorganizzata spesso, e un collegamento morto è peggio di uno assente.
+    for (const citation of citations.filter((c) => c.verification === 'ufficiale_non_indicizzata')) {
+      issues.push({
+        kind: 'source',
+        severity: 'low',
+        title: 'Riferimento ufficiale da verificare',
+        detail:
+          `La pagina ${citation.url} è su un dominio ufficiale ma non risulta nell’indice ` +
+          'curato: potrebbe essere stata spostata o rinominata.',
+        suggestion: 'Aprire il collegamento e, se necessario, aggiornarlo.',
         location: { line: citation.line, heading: headingAbove(input, citation.line), excerpt: citation.url },
         evidence: [citation.url],
       });
@@ -181,13 +232,56 @@ export const sourceAuditorAgent: AgentDefinition<ChapterInput, SourceAuditOutput
       });
     }
 
+    // 3. Ricerca automatica delle fonti mancanti.
+    //
+    //    L'agente interroga la sola documentazione ufficiale: è puro, non tocca
+    //    il database, e il suo esito è riproducibile da chiunque abbia lo stesso
+    //    indice. La biblioteca del progetto — link e PDF caricati dall'autore —
+    //    viene interrogata subito dopo, in un passaggio che ha accesso ai dati.
+    const research = researchClaims(input.claims, OFFICIAL_INDEX);
+    const suggestions: SourceSuggestion[] = research.suggestions;
+    const unmatchedClaims = research.unmatched;
+
+    for (const suggestion of suggestions) {
+      const best = suggestion.candidates[0]!;
+      issues.push({
+        kind: 'source',
+        severity: 'info',
+        title: 'Fonte ufficiale proposta',
+        detail:
+          `Per «${suggestion.statement.slice(0, 160)}» l’indice ufficiale propone «${best.title}» ` +
+          `(${best.section}). Termini in comune: ${best.matchedTerms.join(', ')}.`,
+        suggestion:
+          best.url !== null
+            ? `Valutare l’inserimento del rimando: ${best.url}`
+            : `Valutare il richiamo alla fonte «${best.title}»${best.page !== null ? `, pagina ${best.page}` : ''}.`,
+        location: {
+          line: suggestion.line,
+          heading: headingAbove(input, suggestion.line),
+          excerpt: suggestion.statement.slice(0, 300),
+        },
+        evidence: suggestion.candidates.map(
+          (candidate) => candidate.url ?? `${candidate.title} — pagina ${candidate.page ?? '—'}`,
+        ),
+      });
+    }
+
     const ufficiali = citations.filter((c) => c.isOfficial).length;
+    const daVerificare = citations.filter((c) => c.verification === 'ufficiale_non_indicizzata').length;
 
     return {
       citations,
+      suggestions,
+      unmatchedClaims,
       issues,
+      // La ricerca è deterministica: la certezza riguarda ciò che l'indice
+      // contiene, non ciò che esiste al mondo.
       confidence: 1,
-      summary: `${citations.length} riferimenti, di cui ${ufficiali} ufficiali.`,
+      summary:
+        `${citations.length} riferimenti, di cui ${ufficiali} ufficiali` +
+        (daVerificare > 0 ? ` (${daVerificare} da verificare)` : '') +
+        `. ${suggestions.length} fonti proposte su ${research.examined} affermazioni prive di rimando` +
+        (unmatchedClaims > 0 ? `; per ${unmatchedClaims} l’indice non ha nulla di pertinente.` : '.'),
     };
   },
 };
@@ -196,9 +290,13 @@ export const sourceAuditorAgent: AgentDefinition<ChapterInput, SourceAuditOutput
 // Technical Writer — proposta di revisione
 // ===========================================================================
 
-/** Il Technical Writer riceve il capitolo e i problemi già rilevati. */
+/**
+ * Il Technical Writer riceve il capitolo, i problemi già rilevati e le fonti
+ * che il Source Auditor ha trovato nell'indice ufficiale.
+ */
 export const technicalWriterInputSchema = chapterInputSchema.extend({
   issues: z.array(issueSchema).max(300),
+  suggestions: z.array(sourceSuggestionSchema).max(100),
 });
 export type TechnicalWriterInput = z.infer<typeof technicalWriterInputSchema>;
 
@@ -220,6 +318,12 @@ export const technicalWriterAgent: AgentDefinition<TechnicalWriterInput, Revisio
       'Problemi rilevati:',
       ...input.issues.map((issue) => `- [${issue.severity}] riga ${issue.location.line ?? '—'}: ${issue.title} — ${issue.detail}`),
       '',
+      'Fonti ufficiali già individuate (usa soltanto questi URL):',
+      ...input.suggestions.flatMap((suggestion) => [
+        `- riga ${suggestion.line}: ${suggestion.statement.slice(0, 160)}`,
+        ...suggestion.candidates.map((candidate) => `    · ${candidate.title} — ${candidate.url}`),
+      ]),
+      '',
       'Testo originale:',
       input.contentMd,
     ].join('\n'),
@@ -229,7 +333,8 @@ export const technicalWriterAgent: AgentDefinition<TechnicalWriterInput, Revisio
    *
    *  - dichiara il linguaggio dei blocchi di codice che non lo indicano;
    *  - annota il testo alternativo mancante sulle immagini;
-   *  - inserisce una nota di verifica accanto alle affermazioni senza fonte.
+   *  - elenca in coda le fonti ufficiali trovate per le affermazioni che ne
+   *    erano prive, e separatamente quelle rimaste senza.
    *
    * Non riscrive frasi e non aggiunge contenuto tecnico: quello richiede un
    * modello, e comunque l'approvazione umana.
@@ -273,15 +378,51 @@ export const technicalWriterAgent: AgentDefinition<TechnicalWriterInput, Revisio
       });
     }
 
-    // 3. Nota di verifica sulle affermazioni prive di fonte, in coda al documento
-    //    per non spezzare la lettura.
-    const daVerificare = input.issues.filter((issue) => issue.title === 'Affermazione senza fonte');
+    // 3. Fonti trovate nell'indice ufficiale, in coda al documento.
+    //
+    //    Il collegamento non viene inserito nella frase: spostarlo dentro il
+    //    testo è una scelta editoriale, e spetta al revisore. Qui la proposta
+    //    viene messa a disposizione, con l'URL già pronto da copiare.
+    if (input.suggestions.length > 0) {
+      lines.push(
+        '',
+        '<!-- Nota della revisione automatica: fonti ufficiali proposte -->',
+        '> [!TIP]',
+        '> Fonti ufficiali trovate per le affermazioni prive di rimando:',
+      );
+
+      for (const suggestion of input.suggestions.slice(0, 20)) {
+        lines.push(`> - riga ${suggestion.line}: ${suggestion.statement.slice(0, 200)}`);
+        for (const candidate of suggestion.candidates.slice(0, 3)) {
+          lines.push(`>   - [${candidate.title}](${candidate.url}) — ${candidate.section}`);
+        }
+      }
+
+      changes.push({
+        kind: 'fonte_proposta',
+        line: lines.length,
+        description:
+          `Proposte in coda ${input.suggestions.length} fonti ufficiali, tratte dall’indice ` +
+          'curato e da valutare in revisione.',
+      });
+    }
+
+    // 4. Nota di verifica sulle affermazioni rimaste senza fonte, in coda al
+    //    documento per non spezzare la lettura.
+    const conProposta = new Set(input.suggestions.map((suggestion) => suggestion.line));
+    const daVerificare = input.issues.filter(
+      (issue) =>
+        issue.title === 'Affermazione senza fonte' &&
+        !(issue.location.line !== null && conProposta.has(issue.location.line)),
+    );
+
     if (daVerificare.length > 0) {
       lines.push(
         '',
         '<!-- Nota della revisione automatica: affermazioni da corredare di fonte -->',
         '> [!NOTE]',
-        '> Le seguenti affermazioni risultano prive di un riferimento verificabile:',
+        '> Le seguenti affermazioni restano prive di un riferimento verificabile, e ' +
+          'l’indice ufficiale non contiene nulla di pertinente:',
         ...daVerificare
           .slice(0, 20)
           .map((issue) => `> - riga ${issue.location.line ?? '—'}: ${issue.location.excerpt ?? issue.detail}`),
@@ -406,3 +547,96 @@ function descrizioneDaPercorso(src: string): string {
   const nome = src.split('/').pop()?.replace(/\.[a-z0-9]+$/i, '') ?? 'figura';
   return nome.replace(/[-_]+/g, ' ').replace(/^./, (c) => c.toUpperCase());
 }
+
+// ===========================================================================
+// Source Discovery — scelta delle fonti trovate sul web
+// ===========================================================================
+
+/**
+ * Sceglie, fra indirizzi **già verificati**, quali servono come base del manuale.
+ *
+ * L'agente non cerca e non naviga: riceve un elenco di pagine che sono state
+ * aperte davvero e decide quali tenere, motivando ogni scelta. La divisione è
+ * netta di proposito — chi cerca non giudica, chi giudica non inventa — e
+ * rende l'output verificabile: ogni URL nella risposta è uno di quelli
+ * dell'input, e questo si può controllare, non solo sperare.
+ */
+export const sourceDiscoveryAgent: AgentDefinition<SourceDiscoveryInput, SourceDiscoveryOutput> = {
+  key: 'source_auditor',
+  name: 'Source Auditor · ricerca web',
+  version: 1,
+  promptVersion: 'v1-web',
+  inputSchema: sourceDiscoveryInputSchema,
+  outputSchema: sourceDiscoveryOutputSchema,
+  system:
+    'Scegli le fonti di riferimento utili a scrivere un manuale tecnico. Ricevi un elenco di ' +
+    'pagine già verificate: puoi soltanto sceglierle, mai aggiungerne. Ogni URL della tua ' +
+    'risposta deve comparire identico nell’elenco ricevuto. Preferisci la documentazione del ' +
+    'produttore; una fonte della comunità la tieni solo se copre un argomento che la ' +
+    'documentazione non tratta, e lo dici. Motiva ogni scelta in una frase concreta, riferita a ' +
+    'questo manuale. Rispondi in italiano.',
+
+  buildPrompt: (input) =>
+    [
+      `Manuale: ${input.projectTitle}${input.subtitle ? ` — ${input.subtitle}` : ''}`,
+      `Lingua: ${input.language}`,
+      '',
+      'Argomenti trattati:',
+      ...input.topics.map((topic) => `- ${topic}`),
+      '',
+      'Pagine verificate fra cui scegliere:',
+      ...input.candidates.map(
+        (candidate, index) =>
+          `[${index + 1}] ${candidate.url}\n` +
+          `    titolo: ${candidate.title || '(nessuno)'}\n` +
+          `    dominio: ${candidate.domain}${candidate.isOfficial ? ' (ufficiale)' : candidate.isCommunity ? ' (comunità)' : ''}\n` +
+          (candidate.excerpt ? `    estratto: ${candidate.excerpt.slice(0, 300)}\n` : ''),
+      ),
+    ].join('\n'),
+
+  /**
+   * Selezione senza modello.
+   *
+   * Che una pagina stia sul dominio del produttore è un fatto, non un parere:
+   * basta guardare. La documentazione ufficiale viene tenuta, la comunità
+   * scartata con motivo. È una scelta più povera di quella di un modello — non
+   * sa dire *perché* una pagina serva a questo volume — ma è vera, e permette
+   * di percorrere l'intero flusso senza spendere un centesimo.
+   */
+  deterministic: (input) => {
+    const selected: SourceDiscoveryOutput['selected'] = [];
+    const discarded: SourceDiscoveryOutput['discarded'] = [];
+
+    for (const candidate of input.candidates) {
+      if (!candidate.isOfficial) {
+        discarded.push({
+          url: candidate.url,
+          reason: candidate.isCommunity
+            ? 'Fonte della comunità: senza un modello che ne valuti il contributo, non viene proposta.'
+            : 'Dominio non riconosciuto fra le fonti ufficiali del prodotto.',
+        });
+        continue;
+      }
+
+      const isReference = /\/reference\/|\/api\/|\/rest\b/.test(candidate.url);
+      selected.push({
+        url: candidate.url,
+        title: candidate.title || candidate.domain,
+        kind: isReference ? 'riferimento_api' : 'documentazione_ufficiale',
+        rationale: `Documentazione ufficiale su ${candidate.domain}: è la fonte primaria per il comportamento del prodotto.`,
+        priority: 1,
+      });
+    }
+
+    return {
+      selected,
+      discarded,
+      // Certezza piena su ciò che afferma, che è soltanto: «questo dominio è
+      // quello del produttore». Sull'utilità per il volume non si pronuncia.
+      confidence: 1,
+      summary:
+        `${selected.length} fonti ufficiali su ${input.candidates.length} pagine verificate. ` +
+        'Selezione per dominio: senza un modello, la pertinenza all’argomento non viene valutata.',
+    };
+  },
+};

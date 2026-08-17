@@ -82,6 +82,7 @@ export class ProviderError extends Error {
     readonly retryable: boolean,
     readonly provider: string,
     override readonly cause?: unknown,
+    readonly statusCode?: number,
   ) {
     super(message);
     this.name = 'ProviderError';

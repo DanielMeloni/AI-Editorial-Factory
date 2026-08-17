@@ -33,6 +33,7 @@ L'applicazione è generica: Dataform è il primo caso d'uso, non una personalizz
 | Nessun segreto nel browser | Solo la publishable key raggiunge il client; il service role è confinato al server |
 | Isolamento fra organizzazioni | Row Level Security su tutte le tabelle esposte |
 | Nessun pulsante finto | Ogni comando visibile funziona oppure è disabilitato e dichiarato tale |
+| Nessuna fonte inventata | Ogni indirizzo proposto viene aperto prima di essere mostrato: chi non risponde non compare, e il titolo è quello letto dalla pagina |
 | Sviluppo senza consumare crediti | Provider AI mock attivo per impostazione predefinita |
 
 ---
@@ -49,6 +50,7 @@ L'applicazione è generica: Dataform è il primo caso d'uso, non una personalizz
 | Validazione | Zod | 4.4.3 |
 | Workflow durevoli | Workflow SDK (`workflow`) | 4.8.1 |
 | Archivi | `fflate` | 0.8.3 |
+| Testo dai PDF | `unpdf` | 1.8.1 |
 | Markdown → HTML | `unified` · `remark` · `rehype` | 11.x |
 | PDF | `@react-pdf/renderer` | 4.6.0 |
 | Confronto versioni | `diff` | 9.0.0 |
@@ -86,6 +88,7 @@ src/
 │   ├── auth/            guardie, schemi Zod, Server Action, mappa delle rotte
 │   ├── supabase/        client browser / server / admin / proxy
 │   ├── navigation/      voci di menu e stato di disponibilità
+│   ├── sources/         indice ufficiale, biblioteca di link e PDF, ricerca
 │   ├── workflow/        vocabolario degli stati di esecuzione
 │   ├── utils/           utilità trasversali
 │   └── env.ts           validazione delle variabili di ambiente
@@ -154,6 +157,8 @@ Elenco completo e commentato in [`.env.example`](.env.example).
 | `SUPABASE_SERVICE_ROLE_KEY` | dalla Fase 2 | idem — riservata al server |
 | `AI_TEXT_PROVIDER` / `AI_TEXT_MODEL` | no (default `mock`) | — |
 | `AI_IMAGE_PROVIDER` / `AI_IMAGE_MODEL` | no (default `mock`) | — |
+| `AI_SEARCH_PROVIDER` / `AI_SEARCH_MODEL` | no (default `mock`) | `mock` non cerca e non inventa; `gemini`, `anthropic` o `openai` cercano davvero |
+| `GEMINI_API_KEY` | solo se provider `gemini` | aistudio.google.com/apikey — per le nuove utenze il grounding richiede billing |
 | `OPENAI_API_KEY` | solo se provider `openai` | platform.openai.com/api-keys |
 | `ANTHROPIC_API_KEY` | solo se provider `anthropic` | console.anthropic.com/settings/keys |
 
@@ -176,6 +181,7 @@ ma la prima richiesta reale produce un errore esplicito con l'elenco dei campi m
 | `npm run test:e2e` | Test end-to-end (Playwright) |
 | `npm run check:env` | Verifica la configurazione senza stampare segreti |
 | `npm run db:bundle` | Rigenera `supabase/setup-completo.sql` |
+| `npm run sources:refresh` | Confronta l'indice delle fonti con le sitemap ufficiali |
 | `npm run format` | Prettier |
 | `npm run db:*` | Comandi Supabase CLI (dalla Fase 2) |
 
@@ -229,7 +235,7 @@ Dettagli in [`docs/deployment.md`](docs/deployment.md) (Fase 7).
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | Struttura, flusso di autenticazione, decisioni tecniche |
 | [`docs/database.md`](docs/database.md) | Schema, enum, RLS, indici, test su PostgreSQL reale |
-| [`docs/agents.md`](docs/agents.md) | I dodici agenti, contratti Zod, tracciamento delle esecuzioni |
+| [`docs/agents.md`](docs/agents.md) | I dodici agenti, contratti Zod, indice delle fonti, tracciamento |
 | [`docs/workflows.md`](docs/workflows.md) | Workflow durevole del Capitolo 11, gate di approvazione, revisione |
 | [`docs/visual.md`](docs/visual.md) | Diagrammi, adapter visuale, calcolo del dorso, codice a barre |
 | [`docs/publishing.md`](docs/publishing.md) | Markdown, HTML, PDF, lezione, articolo, download firmati |
@@ -251,13 +257,24 @@ Dettagli in [`docs/deployment.md`](docs/deployment.md) (Fase 7).
    cartelle reali e ogni differenza è segnalata.
 5. **Audit tecnico** — analisi deterministica di SQLX, SQL e JavaScript;
    affermazioni verificabili senza fonte; autorevolezza dei riferimenti.
-6. **Proposta di revisione** — una **nuova versione**, mai una sovrascrittura.
-7. **Revisione umana** — confronto per righe e per parole, approvazione anche
+6. **Ricerca automatica delle fonti** — per ogni affermazione priva di rimando,
+   l'indice curato della documentazione ufficiale propone la pagina che la
+   sostiene, con i termini che hanno prodotto l'aggancio. Quando non ha nulla di
+   pertinente lo dichiara: non ripiega su una fonte qualsiasi. Le fonti trovate
+   compaiono nella scheda **Fonti**, dove si accettano o si scartano una per una.
+7. **Biblioteca del progetto** — link e PDF aggiunti a mano vengono indicizzati
+   (un PDF pagina per pagina) e la ricerca li propone accanto alla documentazione,
+   con l'origine sempre dichiarata e il numero di pagina.
+8. **Ricerca sul web** — l'AI cerca materiale di riferimento per il manuale e
+   mostra quello che ritiene utile, con il motivo di ogni scelta. Ogni indirizzo
+   viene **aperto prima di comparire**: chi non risponde non entra nell'elenco.
+9. **Proposta di revisione** — una **nuova versione**, mai una sovrascrittura.
+10. **Revisione umana** — confronto per righe e per parole, approvazione anche
    **parziale**, modifica manuale, commenti, ripristino.
-8. **Diagrammi** — generati dal codice, esatti per costruzione.
-9. **Copertina** — fronte, dorso e quarta, con dorso calcolato secondo la formula
+11. **Diagrammi** — generati dal codice, esatti per costruzione.
+12. **Copertina** — fronte, dorso e quarta, con dorso calcolato secondo la formula
    del fornitore di stampa e codice a barre EAN-13 validato.
-10. **Pubblicazione** — Markdown, HTML sanificato, PDF, lezione e articolo, con
+13. **Pubblicazione** — Markdown, HTML sanificato, PDF, lezione e articolo, con
     download da collegamento firmato.
 
 Nessun contenuto viene pubblicato senza approvazione umana. Il testo originale
@@ -270,8 +287,8 @@ non viene mai modificato.
 ```
 npm run lint       0 errori
 npm run typecheck  0 errori
-npm test           362 test su 25 file
-npm run build      25 rotte
+npm test           468 test su 30 file
+npm run build      26 rotte
 npm run test:smoke 22 controlli HTTP su build di produzione
 ```
 

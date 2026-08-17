@@ -4,26 +4,30 @@
  * «Ufficiale» significa: dominio del produttore della tecnologia trattata.
  * Un blog o una risposta su un forum possono essere utili, ma non sostituiscono
  * la documentazione quando l'affermazione riguarda il comportamento del prodotto.
+ *
+ * Al giudizio sul dominio si aggiunge il confronto con l'indice curato: un URL
+ * sul dominio giusto ma che l'indice non conosce merita un controllo — la
+ * documentazione viene riorganizzata di continuo, e un collegamento morto è
+ * peggio di un collegamento assente.
  */
 
-const OFFICIAL_DOMAINS = [
-  'cloud.google.com',
-  'dataform.co',
-  'docs.dataform.co',
-  'developers.google.com',
-  'github.com/dataform-co',
-  'googleapis.dev',
-  'cloud.google.com/bigquery',
-];
+import { isCommunityDomain, isOfficialDomain, lookupUrl } from '@/lib/sources/catalog';
 
-/** Domini noti per contenuti utili ma non autorevoli in senso stretto. */
-const COMMUNITY_DOMAINS = [
-  'stackoverflow.com',
-  'medium.com',
-  'reddit.com',
-  'dev.to',
-  'towardsdatascience.com',
-];
+/**
+ * Esito del confronto con l'indice ufficiale.
+ *
+ *  - `ufficiale_indicizzata`     dominio del produttore, pagina presente nell'indice
+ *  - `ufficiale_non_indicizzata` dominio del produttore, pagina non censita
+ *  - `comunita`                  fonte utile ma non autorevole
+ *  - `sconosciuta`               dominio non riconosciuto
+ *  - `non_valida`                URL non interpretabile
+ */
+export type CitationVerification =
+  | 'ufficiale_indicizzata'
+  | 'ufficiale_non_indicizzata'
+  | 'comunita'
+  | 'sconosciuta'
+  | 'non_valida';
 
 export interface CitationAssessment {
   url: string;
@@ -32,17 +36,24 @@ export interface CitationAssessment {
   isOfficial: boolean;
   domain: string;
   note: string | null;
+  /** Vero se la pagina è presente nell'indice curato delle fonti ufficiali. */
+  inIndex: boolean;
+  verification: CitationVerification;
+  /** Titolo della pagina secondo l'indice, quando disponibile. */
+  indexedTitle: string | null;
 }
 
 export function assessCitation(
   link: { url: string; text: string; line: number },
 ): CitationAssessment {
   let domain = '';
+  let pathname = '/';
   let note: string | null = null;
 
   try {
     const parsed = new URL(link.url);
     domain = parsed.hostname.replace(/^www\./, '');
+    pathname = parsed.pathname;
 
     if (parsed.protocol !== 'https:') {
       note = 'Collegamento non cifrato (http): preferire https.';
@@ -55,19 +66,44 @@ export function assessCitation(
       isOfficial: false,
       domain: '',
       note: 'URL non interpretabile.',
+      inIndex: false,
+      verification: 'non_valida',
+      indexedTitle: null,
     };
   }
 
-  const path = `${domain}${new URL(link.url).pathname}`;
-  const isOfficial = OFFICIAL_DOMAINS.some(
-    (official) => domain === official || domain.endsWith(`.${official}`) || path.startsWith(official),
-  );
+  const isOfficial = isOfficialDomain(domain, pathname);
+  const indexed = lookupUrl(link.url);
 
-  if (!isOfficial && COMMUNITY_DOMAINS.some((c) => domain === c || domain.endsWith(`.${c}`))) {
+  let verification: CitationVerification;
+  if (isOfficial) {
+    verification = indexed ? 'ufficiale_indicizzata' : 'ufficiale_non_indicizzata';
+  } else if (isCommunityDomain(domain)) {
+    verification = 'comunita';
+  } else {
+    verification = 'sconosciuta';
+  }
+
+  if (verification === 'ufficiale_non_indicizzata') {
+    note =
+      note ??
+      'Dominio ufficiale, ma la pagina non risulta nell’indice curato: verificare ' +
+        'che il collegamento sia ancora valido.';
+  } else if (verification === 'comunita') {
     note = note ?? 'Fonte della comunità: utile, ma non sostituisce la documentazione ufficiale.';
-  } else if (!isOfficial) {
+  } else if (verification === 'sconosciuta') {
     note = note ?? 'Dominio non riconosciuto fra le fonti ufficiali del prodotto.';
   }
 
-  return { url: link.url, line: link.line, text: link.text, isOfficial, domain, note };
+  return {
+    url: link.url,
+    line: link.line,
+    text: link.text,
+    isOfficial,
+    domain,
+    note,
+    inIndex: indexed !== null,
+    verification,
+    indexedTitle: indexed?.title ?? null,
+  };
 }

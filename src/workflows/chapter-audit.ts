@@ -2,6 +2,7 @@ import { approvalHook } from './hooks';
 import {
   applyDecision,
   auditSources,
+  enrichWithLibrary,
   finishRun,
   generateDiagrams,
   loadChapter,
@@ -25,7 +26,8 @@ import {
  *   1. caricamento del capitolo e dell'ultima versione
  *   2. estrazione di titoli, codice, collegamenti e segnaposto
  *   3. individuazione delle affermazioni verificabili
- *   4. verifica dei riferimenti alla documentazione
+ *   4. verifica dei riferimenti e ricerca delle fonti nell'indice ufficiale
+ *   5. ricerca nella biblioteca del progetto: link e PDF caricati dall'autore
  *   5. analisi tecnica dei blocchi SQLX, SQL e JavaScript
  *   6. persistenza dell'audit
  *   7. proposta di revisione (nuova versione, mai una sovrascrittura)
@@ -64,16 +66,20 @@ export async function chapterAuditWorkflow(input: ChapterAuditInput) {
     const technical = await verifyTechnical(context, loaded.chapter);
 
     await markStep(context.workflowRunId, 'verifica-fonti', 4, TOTAL_STEPS);
-    const sources = await auditSources(context, loaded.chapter);
+    const sources = await auditSources(context, loaded.chapter, technical.claims);
+
+    await markStep(context.workflowRunId, 'ricerca-biblioteca', 5, TOTAL_STEPS);
+    const library = await enrichWithLibrary(context, technical.claims, sources.suggestions);
 
     await markStep(context.workflowRunId, 'salvataggio-audit', 6, TOTAL_STEPS);
-    const audit = await persistAudit(context, technical, sources);
+    const audit = await persistAudit(context, technical, sources, library.suggestions);
 
     await markStep(context.workflowRunId, 'proposta-revisione', 7, TOTAL_STEPS);
     const revision = await proposeRevision(
       context,
       loaded.chapter,
       [...technical.issues, ...sources.issues],
+      library.suggestions,
       loaded.versionId,
     );
 
@@ -94,8 +100,9 @@ export async function chapterAuditWorkflow(input: ChapterAuditInput) {
       loaded.versionId,
       revision.versionId,
       input.resumeToken,
-      `${audit.issueCount} rilievi, ${revision.changeCount} interventi proposti, ` +
-        `${diagrams.assetIds.length} diagrammi, ${visualPlan.items.length} figure previste.`,
+      `${audit.issueCount} rilievi, ${audit.suggestions} fonti ufficiali proposte, ` +
+        `${revision.changeCount} interventi proposti, ${diagrams.assetIds.length} diagrammi, ` +
+        `${visualPlan.items.length} figure previste.`,
     );
 
     // --- Sospensione: si riprende solo con una decisione umana. -------------
@@ -130,6 +137,10 @@ export async function chapterAuditWorkflow(input: ChapterAuditInput) {
       high: audit.high,
       claims: technical.claims.length,
       citations: sources.citations.length,
+      suggestedSources: audit.suggestions,
+      unmatchedClaims:
+        library.libraryEntries > 0 ? library.unmatched : sources.unmatchedClaims,
+      libraryEntries: library.libraryEntries,
       diagrams: diagrams.assetIds.length,
       plannedVisuals: visualPlan.items.length,
       // Gli output editoriali (Markdown, HTML, PDF, lezione, articolo) sono

@@ -27,6 +27,8 @@ describe('applicazione delle migration', () => {
       'series_cover_templates', 'series_members', 'series_release_plans',
       'series_rule_overrides', 'series_rules', 'series_shared_content_versions',
       'series_shared_contents', 'series_style_versions', 'series_terms', 'series_volumes',
+      // Ricerca automatica delle fonti (migration 15-16)
+      'source_suggestions', 'reference_sources', 'reference_chunks',
     ].sort();
 
     const result = await ctx.db.query<{ tablename: string }>(

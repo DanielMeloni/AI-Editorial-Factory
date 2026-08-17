@@ -45,7 +45,12 @@ const HEADER = `-- =============================================================
  * non si pone — ogni file è una transazione — ma chi incolla il bundle
  * nell'SQL Editor esegue tutto insieme e otterrebbe un errore oscuro.
  */
-const TRANSACTION_BOUNDARIES = new Set(['20260809130002_series_agents.sql']);
+const TRANSACTION_BOUNDARIES = new Set([
+  '20260809130002_series_agents.sql',
+  // Introduce un valore di enum con ALTER TYPE ... ADD VALUE: quanto viene
+  // dopo deve trovarsi in una transazione diversa.
+  '20260809140004_web_discovery.sql',
+]);
 
 const BREAK = `
 -- ${'▄'.repeat(72)}
