@@ -127,6 +127,7 @@ export async function runAgent<I, O>(
           system: agent.system,
           prompt: agent.buildPrompt(input),
           temperature: 0.2,
+          maxOutputTokens: agent.maxOutputTokens,
         },
         agent.outputSchema,
       );

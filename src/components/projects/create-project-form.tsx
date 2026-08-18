@@ -7,6 +7,52 @@ import { Input } from '@/components/ui/input';
 import { SubmitButton } from '@/components/auth/submit-button';
 import { createProject } from '@/lib/projects/actions';
 import { initialActionState } from '@/lib/auth/action-state';
+import { LIVELLI, REGISTRI, TONI, type VoceEditoriale } from '@/lib/editorial/direzione';
+
+const CLASSE_SELECT =
+  'flex h-10 w-full rounded-lg border border-border-strong bg-surface px-3 text-sm text-foreground';
+
+/**
+ * Scelta editoriale.
+ *
+ * Ogni opzione mostra a chi parla quel valore: la differenza fra un volume base
+ * e uno avanzato si decide qui, e nasconderla dietro una parola sola
+ * costringerebbe a indovinare.
+ */
+function SceltaEditoriale<T extends string>({
+  id,
+  name,
+  label,
+  voci,
+  defaultValue,
+  error,
+}: {
+  id: string;
+  name: string;
+  label: string;
+  voci: VoceEditoriale<T>[];
+  defaultValue: T;
+  error?: string;
+}) {
+  return (
+    <Field
+      id={id}
+      label={label}
+      hint={voci.map((voce) => `${voce.label}: ${voce.hint}`).join(' · ')}
+      error={error}
+    >
+      {({ id: fieldId, describedBy }) => (
+        <select id={fieldId} name={name} defaultValue={defaultValue} aria-describedby={describedBy} className={CLASSE_SELECT}>
+          {voci.map((voce) => (
+            <option key={voce.value} value={voce.value}>
+              {voce.label} — {voce.hint}
+            </option>
+          ))}
+        </select>
+      )}
+    </Field>
+  );
+}
 
 export function CreateProjectForm() {
   const [state, formAction] = useActionState(createProject, initialActionState);
@@ -72,6 +118,58 @@ export function CreateProjectForm() {
           />
         )}
       </Field>
+
+      <fieldset className="space-y-5 rounded-lg border border-border-subtle p-4">
+        <legend className="px-1 text-sm font-medium text-foreground">Direzione editoriale</legend>
+        <p className="text-xs text-muted-foreground">
+          Vincola l’indice e la scrittura di ogni capitolo. È ciò che distingue un volume base da
+          uno avanzato sullo stesso argomento: cambiare il solo titolo produrrebbe lo stesso libro.
+        </p>
+
+        <div className="grid gap-5 sm:grid-cols-3">
+          <SceltaEditoriale
+            id="level"
+            name="level"
+            label="Livello"
+            voci={LIVELLI}
+            defaultValue="base"
+            error={state.fieldErrors?.level}
+          />
+          <SceltaEditoriale
+            id="tone"
+            name="tone"
+            label="Tono"
+            voci={TONI}
+            defaultValue="didattico"
+            error={state.fieldErrors?.tone}
+          />
+          <SceltaEditoriale
+            id="register"
+            name="register"
+            label="Registro"
+            voci={REGISTRI}
+            defaultValue="tecnico_operativo"
+            error={state.fieldErrors?.register}
+          />
+        </div>
+
+        <Field
+          id="styleNotes"
+          label="Note di stile"
+          hint="Ciò che le liste non coprono. Prevale sulle scelte qui sopra."
+          error={state.fieldErrors?.styleNotes}
+        >
+          {({ id, describedBy }) => (
+            <textarea
+              id={id}
+              name="styleNotes"
+              rows={2}
+              aria-describedby={describedBy}
+              className="flex w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
+            />
+          )}
+        </Field>
+      </fieldset>
 
       <Field id="description" label="Descrizione" error={state.fieldErrors?.description}>
         {({ id, describedBy }) => (

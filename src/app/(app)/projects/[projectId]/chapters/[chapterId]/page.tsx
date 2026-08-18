@@ -16,6 +16,8 @@ import {
   listChapterIssues,
 } from '@/lib/workflows/queries';
 import { isTerminalStatus } from '@/lib/workflow/status';
+import { LiveRefresh } from '@/components/workflows/live-refresh';
+import { MermaidDiagram } from '@/components/visual/mermaid-diagram';
 
 const SEVERITY_TONE = {
   critical: 'danger', high: 'danger', medium: 'warning', low: 'neutral', info: 'info',
@@ -72,6 +74,8 @@ export default async function ChapterPage({
           </div>
         }
       />
+
+      <LiveRefresh projectId={projectId} attiva={inCorso} />
 
       {run ? (
         <Card>
@@ -194,9 +198,7 @@ export default async function ChapterPage({
                     <Badge tone="neutral">v{asset.version}</Badge>
                   </figcaption>
                   {asset.mermaid_source ? (
-                    <pre className="overflow-x-auto rounded-lg border border-border-subtle bg-surface-muted p-3 text-xs">
-                      <code>{asset.mermaid_source}</code>
-                    </pre>
+                    <MermaidDiagram source={asset.mermaid_source} title={asset.title} />
                   ) : null}
                   {asset.caption ? (
                     <p className="text-xs text-muted-foreground">{asset.caption}</p>

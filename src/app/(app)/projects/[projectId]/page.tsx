@@ -8,6 +8,10 @@ import { Alert } from '@/components/ui/alert';
 import { buttonVariants } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { getCurrentManifest, getProject, getProjectStructure, listSources } from '@/lib/projects/queries';
+import { etichettaDirezione } from '@/lib/editorial/direzione';
+import { DeleteProjectCard } from '@/components/projects/delete-project-card';
+import { getProjectProgress } from '@/lib/projects/progress';
+import { NextStepCard } from '@/components/projects/next-step-card';
 
 export default async function ProjectOverviewPage({
   params,
@@ -18,10 +22,11 @@ export default async function ProjectOverviewPage({
   const project = await getProject(projectId);
   if (!project) notFound();
 
-  const [sources, structure, manifest] = await Promise.all([
+  const [sources, structure, manifest, progresso] = await Promise.all([
     listSources(projectId),
     getProjectStructure(projectId),
     getCurrentManifest(projectId),
+    getProjectProgress(projectId),
   ]);
 
   const erroriGravi = (manifest?.discrepancies ?? []).filter((d) => d.severity === 'error');
@@ -38,7 +43,16 @@ export default async function ProjectOverviewPage({
     <main id="contenuto-principale" className="flex-1 space-y-6 p-4 sm:p-6">
       <PageHeader
         title={project.title}
-        description={project.subtitle ?? 'Panoramica del progetto editoriale.'}
+        description={
+          // La direzione editoriale sta accanto al titolo perché è ciò che
+          // distingue questo volume dagli altri sullo stesso argomento.
+          `${project.subtitle ?? 'Panoramica del progetto editoriale.'} · ${etichettaDirezione({
+            level: project.level,
+            tone: project.tone,
+            register: project.register,
+            styleNotes: project.style_notes,
+          })}`
+        }
         actions={
           <Link
             href={`/projects/${projectId}/sources`}
@@ -49,6 +63,8 @@ export default async function ProjectOverviewPage({
           </Link>
         }
       />
+
+      <NextStepCard progresso={progresso} />
 
       {sources.length === 0 ? (
         <EmptyState
@@ -115,6 +131,8 @@ export default async function ProjectOverviewPage({
           ) : null}
         </>
       )}
+      <DeleteProjectCard projectId={projectId} title={project.title} />
+
     </main>
   );
 }

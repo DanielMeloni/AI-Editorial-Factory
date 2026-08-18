@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Ruler, Save } from 'lucide-react';
+import { Ruler, Save, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,7 +10,9 @@ import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { saveCover } from '@/lib/visual/actions';
+import { generateCoverArtwork, saveCover } from '@/lib/visual/actions';
+import { AssetCard } from '@/components/visual/asset-card';
+import { CoverReferences } from '@/components/visual/cover-references';
 import {
   SPINE_FORMULAS,
   SPINE_FORMULA_HINTS,
@@ -21,15 +23,19 @@ import {
 } from '@/lib/cover/spine';
 import { buildCoverPreviewSvg, computeCoverLayout } from '@/lib/cover/layout';
 import { buildIsbnBarcode } from '@/lib/cover/barcode';
-import type { CoverRow } from '@/lib/visual/queries';
+import type { CoverArtworkRow, CoverRow } from '@/lib/visual/queries';
 
 export function CoverStudio({
   projectId,
   cover,
+  artwork,
+  references,
   defaults,
 }: {
   projectId: string;
   cover: CoverRow | null;
+  artwork: CoverArtworkRow[];
+  references: CoverArtworkRow[];
   defaults: { title: string; subtitle: string | null; author: string };
 }) {
   const router = useRouter();
@@ -43,6 +49,22 @@ export function CoverStudio({
   const [carta, setCarta] = useState(cover?.paper_type ?? '');
   const [formula, setFormula] = useState<SpineFormula>(cover?.spine_formula ?? 'mm_per_page');
   const [fattore, setFattore] = useState<string>(cover?.spine_factor?.toString() ?? '');
+
+  // Quale proposta si sta guardando, per pannello. Si parte da ciò che è già
+  // agganciato alla copertina: l'anteprima apre su quello che è vero adesso.
+  const [selezione, setSelezione] = useState<Record<string, string | null>>({
+    cover_front: cover?.front_asset_id ?? null,
+    cover_spine: cover?.spine_asset_id ?? null,
+    cover_back: cover?.back_asset_id ?? null,
+  });
+
+  const grafiche = useMemo(() => {
+    const per = (kind: string) => {
+      const scelto = artwork.find(({ asset }) => asset.id === selezione[kind]);
+      return scelto?.signedUrl ?? null;
+    };
+    return { front: per('cover_front'), spine: per('cover_spine'), back: per('cover_back') };
+  }, [artwork, selezione]);
 
   const [titolo, setTitolo] = useState(cover?.title || defaults.title);
   const [sottotitolo, setSottotitolo] = useState(cover?.subtitle ?? defaults.subtitle ?? '');
@@ -95,10 +117,23 @@ export function CoverStudio({
           backDescription: quarta || null,
           biography: bio || null,
         },
-        { barcodeSvg: barcode?.ok ? barcode.svg : null, showGuides: true },
+        {
+          barcodeSvg: barcode?.ok ? barcode.svg : null,
+          showGuides: true,
+          artwork: grafiche,
+        },
       ),
     };
-  }, [trimW, trimH, spineMm, bleed, safety, titolo, sottotitolo, autore, collana, quarta, bio, barcode]);
+  }, [trimW, trimH, spineMm, bleed, safety, titolo, sottotitolo, autore, collana, quarta, bio, barcode, grafiche]);
+
+  function generaGrafica() {
+    startTransition(async () => {
+      const esito = await generateCoverArtwork(projectId);
+      if (esito.ok) toast.success(esito.message);
+      else toast.error(esito.message);
+      router.refresh();
+    });
+  }
 
   function salva() {
     startTransition(async () => {
@@ -326,10 +361,74 @@ export function CoverStudio({
           </CardContent>
         </Card>
 
-        <Button disabled={pending} onClick={salva}>
-          <Save aria-hidden="true" />
-          {pending ? 'Salvataggio…' : 'Salva copertina'}
-        </Button>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Riferimenti visivi</CardTitle>
+            <CardDescription>
+              Le immagini da cui parte la generazione. Fissano stile, palette e composizione —
+              ciò che un prompt scritto trasmette peggio. Non entrano nel libro e non passano
+              da un’approvazione: sono direzione, non contenuto.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CoverReferences projectId={projectId} references={references} />
+          </CardContent>
+        </Card>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button disabled={pending} onClick={salva}>
+            <Save aria-hidden="true" />
+            {pending ? 'Salvataggio…' : 'Salva copertina'}
+          </Button>
+
+          <Button variant="secondary" disabled={pending || !cover} onClick={generaGrafica}>
+            <Sparkles aria-hidden="true" />
+            {pending ? 'Generazione…' : 'Genera la grafica'}
+          </Button>
+        </div>
+
+        {!cover ? (
+          <p className="text-xs text-muted-foreground">
+            La generazione si abilita dopo il primo salvataggio: le grafiche si agganciano alle
+            specifiche della copertina.
+          </p>
+        ) : null}
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Grafiche generate</CardTitle>
+            <CardDescription>
+              Selezionane una per vederla nell’anteprima: è una prova, non una scelta, e nulla
+              viene scritto. Approvandola diventa la grafica della copertina e sostituisce la
+              precedente. Nessuna contiene testo: titolo, autore e codice a barre restano
+              tipografia, composta sopra all’immagine.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {artwork.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Nessuna grafica generata. L’anteprima qui accanto usa i colori di riserva.
+              </p>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {artwork.map(({ asset, signedUrl }) => (
+                  <AssetCard
+                    key={asset.id}
+                    asset={asset}
+                    signedUrl={signedUrl ?? undefined}
+                    inAnteprima={selezione[asset.kind] === asset.id}
+                    onPreview={(scelto) =>
+                      setSelezione((precedente) => ({
+                        ...precedente,
+                        [scelto.kind]: precedente[scelto.kind] === scelto.id ? null : scelto.id,
+                      }))
+                    }
+                  />
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* --------------------------------------------------------------- */}

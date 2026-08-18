@@ -11,6 +11,7 @@ import { exportMarkdown, type Citation, type ExportMeta } from './markdown';
 import { exportHtml } from './html';
 import { exportPdf } from './pdf';
 import { deriveArticle, deriveLesson } from './derivations';
+import { rebuildVolumePreviewWith, type EsitoAnteprima } from './preview';
 
 /**
  * Produzione degli output editoriali.
@@ -343,4 +344,45 @@ export async function getExportDownloadUrl(exportId: string): Promise<string | n
     .createSignedUrl(data.storage_path, 120, { download: true });
 
   return firmato?.signedUrl ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Anteprima del volume
+// ---------------------------------------------------------------------------
+
+/**
+ * Ricostruisce l'anteprima su richiesta.
+ *
+ * Il workflow la aggiorna da solo a ogni capitolo convalidato; questo pulsante
+ * serve quando si è cambiato qualcosa fuori dal workflow — una modifica manuale,
+ * la bibliografia rigenerata — e si vuole rivedere il volume senza avviare un
+ * audit.
+ */
+export async function rebuildVolumePreview(projectId: string): Promise<EsitoAnteprima> {
+  const user = await requireUser();
+  const organization = await requireOrganization();
+  const supabase = await createClient();
+
+  const esito = await rebuildVolumePreviewWith(supabase, {
+    projectId,
+    organizationId: organization.id,
+    actorId: user.id,
+  });
+
+  if (esito.ok) revalidatePath(`/projects/${projectId}/preview`);
+  return esito;
+}
+
+/** URL firmato dell'anteprima corrente, se esiste. */
+export async function getVolumePreviewUrl(projectId: string): Promise<string | null> {
+  await requireUser();
+  const organization = await requireOrganization();
+  const supabase = await createClient();
+
+  const path = `${organization.id}/${projectId}/volume/anteprima.pdf`;
+  const { data } = await supabase.storage
+    .from('publication-exports')
+    .createSignedUrl(path, 3600);
+
+  return data?.signedUrl ?? null;
 }

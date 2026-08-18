@@ -23,6 +23,10 @@ export async function createProject(_prev: ActionState, formData: FormData): Pro
     volume: formData.get('volume') ?? '',
     language: formData.get('language') ?? 'it',
     description: formData.get('description') ?? '',
+    level: formData.get('level') ?? 'base',
+    tone: formData.get('tone') ?? 'didattico',
+    register: formData.get('register') ?? 'tecnico_operativo',
+    styleNotes: formData.get('styleNotes') ?? '',
   });
 
   if (!parsed.success) {
@@ -62,15 +66,27 @@ export async function createProject(_prev: ActionState, formData: FormData): Pro
       volume: parsed.data.volume || null,
       language: parsed.data.language,
       description: parsed.data.description || null,
+      level: parsed.data.level,
+      tone: parsed.data.tone,
+      register: parsed.data.register,
+      style_notes: parsed.data.styleNotes || null,
       created_by: user.id,
     })
     .select('id')
     .single<Pick<ProjectRow, 'id'>>();
 
   if (error || !data) {
+    // «Riprova» è un consiglio inutile quando la causa è strutturale — una
+    // colonna che manca perché una migrazione non è stata applicata non
+    // sparisce al secondo tentativo. Il motivo va detto.
+    const dettaglio = error?.message ?? 'il database non ha restituito la riga creata';
+    const migrazioneMancante = /column .* does not exist|schema cache/i.test(dettaglio);
+
     return {
       status: 'error',
-      message: 'Creazione del progetto non riuscita. Riprova.',
+      message: migrazioneMancante
+        ? `Creazione non riuscita: ${dettaglio}. Sembra una migrazione non applicata: esegui «npx supabase db push».`
+        : `Creazione non riuscita: ${dettaglio}`,
     };
   }
 
@@ -165,4 +181,122 @@ export async function requestUploadTicket(input: {
   }
 
   return { ok: true, sourceId, bucket: 'project-sources', path, token: signed.token };
+}
+
+// ---------------------------------------------------------------------------
+// Eliminazione
+// ---------------------------------------------------------------------------
+
+/** I bucket che conservano i file di un progetto. */
+const BUCKET_PROGETTO = ['project-sources', 'generated-assets', 'publication-exports'] as const;
+
+/**
+ * Tutti gli oggetti sotto un prefisso, cartelle comprese.
+ *
+ * Lo storage non cancella per prefisso: bisogna nominare ogni file. Le voci
+ * senza `id` sono cartelle e vanno percorse, non rimosse.
+ */
+async function elencaOggetti(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  bucket: string,
+  prefisso: string,
+): Promise<string[]> {
+  const { data, error } = await supabase.storage.from(bucket).list(prefisso, { limit: 1000 });
+  if (error || !data) return [];
+
+  const percorsi: string[] = [];
+  for (const voce of data) {
+    const completo = `${prefisso}/${voce.name}`;
+    if (voce.id === null) percorsi.push(...(await elencaOggetti(supabase, bucket, completo)));
+    else percorsi.push(completo);
+  }
+  return percorsi;
+}
+
+export interface DeleteProjectResult {
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * Elimina un progetto e tutto ciò che ne discende.
+ *
+ * È l'unica operazione irreversibile dell'applicazione, e per questo chiede di
+ * scrivere il titolo: un pulsante da solo si preme per sbaglio, un titolo no.
+ *
+ * L'ordine conta. Prima si registra in audit — dopo la cancellazione non ci
+ * sarebbe più nulla da cui ricostruire cosa è successo, e il registro
+ * sopravvive perché non ha vincoli verso il progetto. Poi si rimuovono i file,
+ * che il database non sa cancellare: la cascata delle chiavi esterne libera le
+ * righe ma lascerebbe negli storage byte orfani e a pagamento, senza più
+ * nessuna riga che ne ricordi l'esistenza. La riga del progetto va per ultima,
+ * così un guasto a metà lascia un progetto ancora visibile e ripulibile invece
+ * di file irraggiungibili.
+ */
+export async function deleteProject(
+  projectId: string,
+  conferma: string,
+): Promise<DeleteProjectResult> {
+  const user = await requireUser();
+  const organization = await requireOrganization();
+  const supabase = await createClient();
+
+  const { data: project } = await supabase
+    .from('projects')
+    .select('id, organization_id, title, slug')
+    .eq('id', projectId)
+    .maybeSingle<{ id: string; organization_id: string; title: string; slug: string }>();
+
+  if (!project || project.organization_id !== organization.id) {
+    return { ok: false, message: 'Progetto non trovato.' };
+  }
+
+  if (conferma.trim() !== project.title.trim()) {
+    return { ok: false, message: 'Il titolo digitato non coincide: eliminazione annullata.' };
+  }
+
+  const { count: chapters } = await supabase
+    .from('chapters')
+    .select('id', { count: 'exact', head: true })
+    .eq('project_id', project.id);
+
+  await recordAudit({
+    organizationId: organization.id,
+    actorId: user.id,
+    action: 'project.deleted',
+    entityType: 'project',
+    entityId: project.id,
+    metadata: { title: project.title, slug: project.slug, chapters: chapters ?? 0 },
+  });
+
+  const prefisso = `${organization.id}/${project.id}`;
+  let rimossi = 0;
+  const bucketIncompleti: string[] = [];
+
+  for (const bucket of BUCKET_PROGETTO) {
+    const oggetti = await elencaOggetti(supabase, bucket, prefisso);
+    for (let i = 0; i < oggetti.length; i += 100) {
+      const lotto = oggetti.slice(i, i + 100);
+      const { error } = await supabase.storage.from(bucket).remove(lotto);
+      if (error) bucketIncompleti.push(bucket);
+      else rimossi += lotto.length;
+    }
+  }
+
+  // La cascata delle chiavi esterne porta via capitoli, versioni, esecuzioni,
+  // asset, revisioni ed esportazioni: sono 21 tabelle collegate a `projects`
+  // con `on delete cascade`.
+  const { error } = await supabase.from('projects').delete().eq('id', project.id);
+  if (error) {
+    return { ok: false, message: `Eliminazione non riuscita: ${error.message}` };
+  }
+
+  revalidatePath('/projects');
+
+  return {
+    ok: true,
+    message: bucketIncompleti.length
+      ? `Progetto eliminato, ma alcuni file non sono stati rimossi da: ${[...new Set(bucketIncompleti)].join(', ')}.`
+      : `Progetto eliminato: ${chapters ?? 0} capitoli e ${rimossi} file.`,
+  };
 }

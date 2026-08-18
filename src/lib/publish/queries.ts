@@ -105,3 +105,27 @@ export async function listExportableChapters(projectId: string): Promise<Chapter
     };
   });
 }
+
+/** Stato dell'anteprima del volume, senza esporne l'indirizzo firmato. */
+export interface VolumePreviewInfo {
+  byteSize: number | null;
+  completedAt: string | null;
+}
+
+export async function getVolumePreviewInfo(
+  projectId: string,
+): Promise<VolumePreviewInfo | null> {
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from('exports')
+    .select('byte_size, completed_at, status')
+    .eq('project_id', projectId)
+    .is('chapter_id', null)
+    .eq('format', 'pdf')
+    .limit(1)
+    .maybeSingle<{ byte_size: number | null; completed_at: string | null; status: string }>();
+
+  if (!data || data.status !== 'ready') return null;
+  return { byteSize: data.byte_size, completedAt: data.completed_at };
+}

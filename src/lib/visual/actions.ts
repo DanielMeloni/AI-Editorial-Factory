@@ -75,6 +75,31 @@ export async function generateIllustration(
 
   const { provider, degraded } = getImageProvider();
 
+  // I riferimenti visivi caricati dall'autore sono la base della generazione:
+  // senza, ogni esecuzione ripartirebbe da una direzione visuale diversa.
+  const { data: riferimenti } = await supabase
+    .from('visual_assets')
+    .select('storage_bucket, storage_path')
+    .eq('project_id', projectId)
+    .eq('kind', 'photo')
+    .eq('generator', 'upload')
+    .order('created_at', { ascending: true })
+    .limit(8)
+    .returns<{ storage_bucket: string | null; storage_path: string | null }[]>();
+
+  const basi: { bytes: Uint8Array; mimeType: string }[] = [];
+  for (const riferimento of riferimenti ?? []) {
+    if (!riferimento.storage_path) continue;
+    const { data: file } = await supabase.storage
+      .from(riferimento.storage_bucket ?? 'generated-assets')
+      .download(riferimento.storage_path);
+    if (!file) continue;
+    basi.push({
+      bytes: new Uint8Array(await file.arrayBuffer()),
+      mimeType: file.type || 'image/png',
+    });
+  }
+
   let immagine;
   try {
     immagine = await provider.generate({
@@ -214,6 +239,37 @@ export async function decideAsset(
       .neq('id', assetId);
   }
 
+  // Per le grafiche di copertina l'approvazione è anche la messa in opera:
+  // approvare una copertina che poi resta da agganciare a mano sarebbe una
+  // decisione presa e non applicata.
+  const SLOT: Record<string, string> = {
+    cover_front: 'front_asset_id',
+    cover_spine: 'spine_asset_id',
+    cover_back: 'back_asset_id',
+  };
+  const slot = SLOT[asset.kind];
+
+  if (decision === 'approved' && slot) {
+    await supabase
+      .from('visual_assets')
+      .update({ status: 'superseded' })
+      .eq('project_id', asset.project_id)
+      .eq('kind', asset.kind)
+      .eq('status', 'approved')
+      .neq('id', assetId);
+
+    const { data: cover } = await supabase
+      .from('cover_projects')
+      .select('id')
+      .eq('project_id', asset.project_id)
+      .limit(1)
+      .maybeSingle<{ id: string }>();
+
+    if (cover) {
+      await supabase.from('cover_projects').update({ [slot]: assetId }).eq('id', cover.id);
+    }
+  }
+
   await recordAudit({
     organizationId: organization.id,
     actorId: user.id,
@@ -223,9 +279,16 @@ export async function decideAsset(
   });
 
   revalidatePath(`/projects/${asset.project_id}/visual-studio`);
+  revalidatePath(`/projects/${asset.project_id}/cover-studio`);
+
   return {
     ok: true,
-    message: decision === 'approved' ? 'Asset approvato.' : 'Asset rifiutato.',
+    message:
+      decision === 'approved'
+        ? slot
+          ? 'Grafica approvata e applicata alla copertina.'
+          : 'Asset approvato.'
+        : 'Asset rifiutato.',
   };
 }
 
@@ -369,4 +432,377 @@ export async function saveCover(input: CoverInput): Promise<VisualActionResult> 
       ? `Copertina salvata. Dorso calcolato: ${spineWidthMm} mm.`
       : 'Copertina salvata. Il dorso resta da calcolare: serve il numero definitivo di pagine.',
   };
+}
+
+// ---------------------------------------------------------------------------
+// Grafica di copertina
+// ---------------------------------------------------------------------------
+
+const PARTI = [
+  {
+    kind: 'cover_front' as const,
+    campo: 'front_asset_id' as const,
+    etichetta: 'fronte',
+    /** Il fronte è ciò che si vede in vetrina: immagine sola, senza testo. */
+    intento:
+      'Immagine di copertina per un manuale tecnico. Composizione verticale, ' +
+      'soggetto centrale forte, ampio spazio libero nella metà superiore dove verranno ' +
+      'composti titolo e sottotitolo.',
+  },
+  {
+    kind: 'cover_spine' as const,
+    campo: 'spine_asset_id' as const,
+    etichetta: 'dorso',
+    intento:
+      'Texture verticale continua per il dorso di un libro: motivo uniforme, senza ' +
+      'soggetti riconoscibili, che regga un ritaglio molto stretto senza perdere senso.',
+  },
+  {
+    kind: 'cover_back' as const,
+    campo: 'back_asset_id' as const,
+    etichetta: 'quarta',
+    intento:
+      'Sfondo per la quarta di copertina: variazione più quieta e scura della stessa ' +
+      'immagine di fronte, con ampie superfici uniformi su cui il testo resti leggibile.',
+  },
+];
+
+/**
+ * Genera le tre grafiche della copertina — fronte, dorso, quarta.
+ *
+ * Le tre parti nascono da una direzione visuale comune, così che sulle pieghe
+ * non si veda uno stacco. Nessuna di esse contiene testo: titolo, autore e
+ * codice a barre appartengono all'impaginato, che li compone in tipografia
+ * reale sopra l'immagine. Un titolo disegnato dal modello sarebbe illeggibile
+ * in stampa e impossibile da correggere.
+ *
+ * Le tre immagini nascono in attesa di approvazione, come ogni altro asset.
+ */
+export async function generateCoverArtwork(projectId: string): Promise<VisualActionResult> {
+  const user = await requireUser();
+  const organization = await requireOrganization();
+
+  if (!z.string().uuid().safeParse(projectId).success) {
+    return { ok: false, message: 'Progetto non valido.' };
+  }
+
+  const supabase = await createClient();
+
+  const { data: project } = await supabase
+    .from('projects')
+    .select('id, organization_id, title, subtitle, description')
+    .eq('id', projectId)
+    .maybeSingle<{
+      id: string; organization_id: string; title: string;
+      subtitle: string | null; description: string | null;
+    }>();
+
+  if (!project || project.organization_id !== organization.id) {
+    return { ok: false, message: 'Progetto non trovato.' };
+  }
+
+  const { data: cover } = await supabase
+    .from('cover_projects')
+    .select('id, trim_width_mm, trim_height_mm, spine_width_mm, title, subtitle, back_description, series_name')
+    .eq('project_id', projectId)
+    .limit(1)
+    .maybeSingle<{
+      id: string; trim_width_mm: number; trim_height_mm: number; spine_width_mm: number | null;
+      title: string; subtitle: string | null; back_description: string | null; series_name: string | null;
+    }>();
+
+  // Le tre grafiche si agganciano alla copertina: senza, non avrebbero dove
+  // essere registrate e resterebbero asset sciolti.
+  if (!cover) {
+    return {
+      ok: false,
+      message: 'Salva prima la copertina: le grafiche si agganciano alle sue specifiche.',
+    };
+  }
+
+  const limite = await checkRateLimit(supabase, 'imageGeneration', organization.id);
+  if (!limite.allowed) return { ok: false, message: limite.message };
+
+  const { provider, degraded } = getImageProvider();
+
+  // La direzione visuale è unica per le tre parti: è ciò che le tiene insieme
+  // quando il libro viene chiuso.
+  const soggetto = [
+    `Manuale tecnico intitolato «${cover.title || project.title}».`,
+    cover.subtitle || project.subtitle ? `Sottotitolo: ${cover.subtitle ?? project.subtitle}.` : '',
+    project.description ? `Argomento: ${project.description.slice(0, 600)}.` : '',
+    cover.series_name ? `Collana: ${cover.series_name}.` : '',
+    'Registro sobrio e professionale, astratto o schematico, adatto a un lettore tecnico. ',
+    'Palette coerente fra le tre parti.',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const avvisi: string[] = degraded ? [degraded] : [];
+  const generati: { assetId: string; campo: string }[] = [];
+  let costo = 0;
+
+  for (const parte of PARTI) {
+    const larghezzaMm =
+      parte.kind === 'cover_spine' ? (cover.spine_width_mm ?? 10) : cover.trim_width_mm;
+
+    let immagine;
+    try {
+      immagine = await provider.generate({
+        prompt: `${parte.intento}\n\n${soggetto}`,
+        width: Math.round(larghezzaMm * 12),
+        height: Math.round(cover.trim_height_mm * 12),
+        references: basi,
+      });
+    } catch (error) {
+      // Ciò che è già stato generato resta: non si butta via lavoro pagato.
+      const motivo = (error as Error).message;
+      return {
+        ok: generati.length > 0,
+        message:
+          generati.length > 0
+            ? `Generate ${generati.length} grafiche su ${PARTI.length}; il ${parte.etichetta} è fallito: ${motivo}`
+            : `Generazione del ${parte.etichetta} non riuscita: ${motivo}`,
+      };
+    }
+
+    avvisi.push(...immagine.warnings.map((avviso) => `${parte.etichetta}: ${avviso}`));
+    costo += immagine.estimatedCostUsd;
+
+    const { data: precedente } = await supabase
+      .from('visual_assets')
+      .select('version')
+      .eq('project_id', projectId)
+      .eq('kind', parte.kind)
+      .order('version', { ascending: false })
+      .limit(1)
+      .maybeSingle<{ version: number }>();
+
+    const version = (precedente?.version ?? 0) + 1;
+    const assetId = crypto.randomUUID();
+    const storagePath = `${organization.id}/${projectId}/cover/${assetId}.png`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('generated-assets')
+      .upload(storagePath, immagine.bytes, { contentType: immagine.mimeType, upsert: false });
+
+    if (uploadError) {
+      return { ok: false, message: `Salvataggio del ${parte.etichetta} non riuscito: ${uploadError.message}` };
+    }
+
+    const { error: insertError } = await supabase.from('visual_assets').insert({
+      id: assetId,
+      project_id: projectId,
+      organization_id: organization.id,
+      chapter_id: null,
+      kind: parte.kind,
+      generator: 'ai',
+      status: 'pending_approval',
+      version,
+      title: `Copertina — ${parte.etichetta}`,
+      caption: `Grafica del ${parte.etichetta}, v${version}.`,
+      alt_text: `Grafica astratta per il ${parte.etichetta} della copertina di «${cover.title || project.title}», senza testo.`,
+      prompt: `${parte.intento}\n\n${soggetto}`,
+      provider: immagine.provider,
+      model: immagine.model,
+      seed: immagine.seed,
+      width: immagine.width,
+      height: immagine.height,
+      storage_bucket: 'generated-assets',
+      storage_path: storagePath,
+      cost_usd: immagine.estimatedCostUsd,
+      created_by: user.id,
+    });
+
+    if (insertError) {
+      await supabase.storage.from('generated-assets').remove([storagePath]);
+      return { ok: false, message: `Registrazione del ${parte.etichetta} non riuscita.` };
+    }
+
+    generati.push({ assetId, campo: parte.campo });
+  }
+
+  // La generazione propone e basta: l'aggancio alla copertina avviene
+  // all'approvazione, che è il momento in cui una persona ha guardato.
+  // Generare non è scegliere.
+
+  await recordAudit({
+    organizationId: organization.id,
+    actorId: user.id,
+    action: 'cover.artwork_generated',
+    entityType: 'cover_project',
+    entityId: cover.id,
+    metadata: { provider: provider.name, model: provider.model, parti: generati.length, costo },
+  });
+
+  revalidatePath(`/projects/${projectId}/cover-studio`);
+
+  return {
+    ok: true,
+    assetId: generati[0]?.assetId,
+    message: [
+      `Tre grafiche proposte${basi.length > 0 ? ` da ${basi.length} riferiment${basi.length === 1 ? 'o' : 'i'}` : ' senza riferimenti visivi'} (${costo > 0 ? `$${costo.toFixed(4)}` : 'costo non stimato'}): selezionale per vederle in anteprima, approvale per applicarle.`,
+      ...avvisi,
+    ].join(' '),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Riferimenti visivi della copertina
+// ---------------------------------------------------------------------------
+
+const MIME_RIFERIMENTO = ['image/png', 'image/jpeg', 'image/webp'] as const;
+const MAX_BYTE_RIFERIMENTO = 10 * 1024 * 1024;
+
+export interface CoverReferenceTicket {
+  ok: true;
+  assetId: string;
+  bucket: string;
+  path: string;
+  token: string;
+}
+
+/**
+ * Prepara il caricamento di un'immagine di riferimento.
+ *
+ * Il file non passa dal server applicativo: viene caricato dal browser
+ * direttamente su Storage con un URL firmato, come già fanno gli archivi e i
+ * PDF della biblioteca. Non è solo una questione di limiti — far transitare
+ * dieci megabyte per una Server Action significa occupare il processo che
+ * serve le pagine per il tempo del trasferimento.
+ *
+ * La riga dell'asset non nasce qui: nasce a caricamento avvenuto. Registrarla
+ * prima lascerebbe, a ogni caricamento interrotto, un riferimento che punta a
+ * un file inesistente.
+ */
+export async function requestCoverReferenceTicket(input: {
+  projectId: string;
+  filename: string;
+  byteSize: number;
+  mimeType: string;
+}): Promise<CoverReferenceTicket | { ok: false; message: string }> {
+  await requireUser();
+  const organization = await requireOrganization();
+
+  if (!z.string().uuid().safeParse(input.projectId).success) {
+    return { ok: false, message: 'Progetto non valido.' };
+  }
+  if (!MIME_RIFERIMENTO.includes(input.mimeType as (typeof MIME_RIFERIMENTO)[number])) {
+    return { ok: false, message: 'Formati ammessi: PNG, JPEG, WebP.' };
+  }
+  if (input.byteSize <= 0 || input.byteSize > MAX_BYTE_RIFERIMENTO) {
+    return { ok: false, message: 'L’immagine supera i 10 MB.' };
+  }
+
+  const supabase = await createClient();
+
+  const { data: project } = await supabase
+    .from('projects')
+    .select('id, organization_id')
+    .eq('id', input.projectId)
+    .maybeSingle<{ id: string; organization_id: string }>();
+
+  if (!project || project.organization_id !== organization.id) {
+    return { ok: false, message: 'Progetto non trovato.' };
+  }
+
+  const assetId = crypto.randomUUID();
+  const estensione =
+    input.mimeType === 'image/jpeg' ? 'jpg' : input.mimeType === 'image/webp' ? 'webp' : 'png';
+  const path = `${organization.id}/${input.projectId}/cover-refs/${assetId}.${estensione}`;
+
+  const { data: firmato, error } = await supabase.storage
+    .from('generated-assets')
+    .createSignedUploadUrl(path);
+
+  if (error || !firmato) {
+    return { ok: false, message: 'Impossibile preparare il caricamento. Riprova.' };
+  }
+
+  return { ok: true, assetId, bucket: 'generated-assets', path, token: firmato.token };
+}
+
+/**
+ * Registra il riferimento a caricamento avvenuto.
+ *
+ * Se la registrazione fallisce il file viene rimosso: un oggetto su Storage che
+ * nessuna riga menziona non è raggiungibile da nessuna parte dell'applicazione,
+ * e continuerebbe a occupare spazio senza che nulla ne ricordi l'esistenza.
+ */
+export async function confirmCoverReference(input: {
+  projectId: string;
+  assetId: string;
+  path: string;
+  filename: string;
+}): Promise<VisualActionResult> {
+  const user = await requireUser();
+  const organization = await requireOrganization();
+  const supabase = await createClient();
+
+  if (!input.path.startsWith(`${organization.id}/${input.projectId}/cover-refs/`)) {
+    return { ok: false, message: 'Percorso non valido.' };
+  }
+
+  const { error } = await supabase.from('visual_assets').insert({
+    id: input.assetId,
+    project_id: input.projectId,
+    organization_id: organization.id,
+    chapter_id: null,
+    kind: 'photo',
+    generator: 'upload',
+    // Nasce approvato perché non finisce nel libro: è materiale di direzione
+    // visuale, e chiederne l'approvazione confonderebbe due cose diverse.
+    status: 'approved',
+    version: 1,
+    title: input.filename.slice(0, 200) || 'Riferimento visivo',
+    caption: 'Riferimento per la generazione della copertina.',
+    alt_text: 'Immagine di riferimento caricata dall’autore.',
+    storage_bucket: 'generated-assets',
+    storage_path: input.path,
+    cost_usd: 0,
+    created_by: user.id,
+  });
+
+  if (error) {
+    await supabase.storage.from('generated-assets').remove([input.path]);
+    return { ok: false, message: `Registrazione del riferimento non riuscita: ${error.message}` };
+  }
+
+  revalidatePath(`/projects/${input.projectId}/cover-studio`);
+  return { ok: true, assetId: input.assetId, message: 'Riferimento caricato.' };
+}
+
+/** Rimuove un riferimento visivo, file compreso. */
+export async function deleteCoverReference(assetId: string): Promise<VisualActionResult> {
+  await requireUser();
+  const organization = await requireOrganization();
+  const supabase = await createClient();
+
+  const { data: asset } = await supabase
+    .from('visual_assets')
+    .select('id, project_id, organization_id, kind, generator, storage_bucket, storage_path')
+    .eq('id', assetId)
+    .maybeSingle<{
+      id: string; project_id: string; organization_id: string; kind: string;
+      generator: string; storage_bucket: string | null; storage_path: string | null;
+    }>();
+
+  if (!asset || asset.organization_id !== organization.id) {
+    return { ok: false, message: 'Riferimento non trovato.' };
+  }
+  // Il vincolo è esplicito: da qui si cancellano i riferimenti, non gli asset
+  // dell'opera, che hanno un percorso di approvazione tutto loro.
+  if (asset.kind !== 'photo' || asset.generator !== 'upload') {
+    return { ok: false, message: 'Questo asset non è un riferimento visivo.' };
+  }
+
+  if (asset.storage_path) {
+    await supabase.storage
+      .from(asset.storage_bucket ?? 'generated-assets')
+      .remove([asset.storage_path]);
+  }
+  await supabase.from('visual_assets').delete().eq('id', assetId);
+
+  revalidatePath(`/projects/${asset.project_id}/cover-studio`);
+  return { ok: true, message: 'Riferimento rimosso.' };
 }

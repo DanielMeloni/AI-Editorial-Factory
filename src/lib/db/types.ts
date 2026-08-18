@@ -38,6 +38,10 @@ export interface ProjectRow {
   language: string;
   status: ProjectStatus;
   description: string | null;
+  level: 'base' | 'intermediate' | 'advanced';
+  tone: string;
+  register: string;
+  style_notes: string | null;
   created_at: string;
   updated_at: string;
 }

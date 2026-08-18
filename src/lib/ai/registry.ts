@@ -7,6 +7,7 @@ import { OpenAITextProvider } from './text/openai';
 import { AnthropicTextProvider } from './text/anthropic';
 import { RoutedTextProvider } from './text/routed';
 import { MockImageProvider } from './image/mock';
+import { DEFAULT_OPENAI_IMAGE_MODEL, OpenAIImageProvider } from './image/openai';
 import type { WebSearchProvider } from './search/types';
 import { MockWebSearchProvider } from './search/mock';
 import { AnthropicWebSearchProvider } from './search/anthropic';
@@ -136,12 +137,28 @@ export function getTextProvider(agentKey?: AgentProviderKey): { provider: TextPr
 export function getImageProvider(): { provider: ImageProvider; degraded: string | null } {
   const env = getServerEnv();
 
-  // L'adapter visuale reale arriva con la Fase 5: oggi solo il mock è
-  // implementato, e viene dichiarato come tale invece di fingere altro.
-  if (env.AI_IMAGE_PROVIDER !== 'mock') {
+  if (env.AI_IMAGE_PROVIDER === 'openai') {
+    if (!env.OPENAI_API_KEY) {
+      return {
+        provider: new MockImageProvider(),
+        degraded: 'AI_IMAGE_PROVIDER=openai ma OPENAI_API_KEY è assente: uso il provider mock.',
+      };
+    }
+
+    // Un identificativo testuale mandato all'endpoint delle immagini darebbe un
+    // errore oscuro dall'altra parte: si corregge qui, dicendolo.
+    const coerente = /^gpt-image/i.test(env.AI_IMAGE_MODEL)
+      ? { model: env.AI_IMAGE_MODEL, note: null as string | null }
+      : {
+          model: DEFAULT_OPENAI_IMAGE_MODEL,
+          note:
+            `AI_IMAGE_MODEL=«${env.AI_IMAGE_MODEL}» non è un modello visuale OpenAI: ` +
+            `uso «${DEFAULT_OPENAI_IMAGE_MODEL}». Allinea la variabile per evitare sorprese.`,
+        };
+
     return {
-      provider: new MockImageProvider(),
-      degraded: `Il provider visuale «${env.AI_IMAGE_PROVIDER}» non è ancora implementato: uso il mock.`,
+      provider: new OpenAIImageProvider(env.OPENAI_API_KEY, coerente.model),
+      degraded: coerente.note,
     };
   }
 

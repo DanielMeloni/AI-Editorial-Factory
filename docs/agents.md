@@ -336,3 +336,38 @@ come le altre. Fra il trovarle e l'usarle c'è sempre una persona.
 |---|---|
 | **Cerca fonti sul web** | Va a cercare materiale nuovo per il manuale |
 | **Verifica affermazioni** | Collega le frasi prive di rimando a ciò che già si ha: documentazione ufficiale e biblioteca |
+
+---
+
+## 11. «Non lo conosco» non è «non esiste»
+
+L'audit di un capitolo apre i collegamenti citati. Non è un controllo in più:
+è ciò che distingue un rilievo da un sospetto.
+
+Senza, l'unica cosa che il sistema può dire di una pagina non censita è «non
+risulta nel mio indice» — un'affermazione **su di sé**, non sul mondo. Una
+pagina può esistere benissimo senza essere nel catalogo, e presentare quel
+dubbio come rilievo grave fa due danni: fa perdere tempo al revisore, e gli
+insegna a non fidarsi dei rilievi. Il secondo è il peggiore, perché toglie
+valore anche a quelli giusti.
+
+Aprendo l'indirizzo la domanda cambia, e diventa una a cui qualcuno risponde:
+
+| Esito | Che cosa compare |
+|---|---|
+| Risponde, ed è censita | Nessun rilievo |
+| Risponde, ufficiale, non censita | `info` — «Pagina ufficiale non ancora censita»: è l'**indice** a essere incompleto, non il capitolo. Con l'invito ad aggiungerla |
+| Non risponde | `high` — «Collegamento non raggiungibile», con lo stato HTTP. Un collegamento morto su carta stampata non è correggibile |
+
+Il sospetto emesso a monte viene **rimosso** quando arriva l'esito reale:
+leggere un dubbio e la sua risposta, nell'ordine sbagliato, è peggio che
+leggere solo la risposta.
+
+Su `citations`, `is_reachable` dice adesso ciò che il nome promette: se la
+pagina ha risposto quando è stata aperta.
+
+### Riga zero
+
+Le righe di un file partono da 1. Uno zero significa «riga non determinata», e
+viene mostrato come tale invece di mandare il revisore a cercare qualcosa a una
+riga che non esiste.

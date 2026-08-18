@@ -8,7 +8,7 @@ import { SourceUploader } from '@/components/projects/source-uploader';
 import { ReferenceLibrary } from '@/components/sources/reference-library';
 import { FoundSources } from '@/components/sources/found-sources';
 import { WebDiscovery } from '@/components/sources/web-discovery';
-import { NextStepButton, SearchSourcesButton } from '@/components/sources/source-actions';
+import { CreateStructureButton, NextStepButton, SearchSourcesButton } from '@/components/sources/source-actions';
 import { getProject, listSources } from '@/lib/projects/queries';
 import {
   getNextStep,
@@ -70,6 +70,10 @@ export default async function SourcesPage({
 
       <div className="flex flex-wrap items-center gap-2">
         <SearchSourcesButton projectId={projectId} />
+        <CreateStructureButton
+          projectId={projectId}
+          enabled={references.length > 0 || sources.length > 0}
+        />
         <NextStepButton step={nextStep} />
         <p className="text-xs text-muted-foreground">{nextStep.detail}</p>
       </div>

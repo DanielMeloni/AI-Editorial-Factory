@@ -4,18 +4,85 @@ import { cn } from '@/lib/utils/cn';
 import type { AgentRunRow, WorkflowRunRow } from '@/lib/workflows/queries';
 import type { RunStatus } from '@/lib/workflow/status';
 
-/** I passaggi previsti dal workflow, nell'ordine in cui vengono eseguiti. */
-const STEPS: { key: string; label: string }[] = [
-  { key: 'caricamento-capitolo', label: 'Caricamento del capitolo' },
-  { key: 'verifica-tecnica', label: 'Analisi tecnica del codice' },
-  { key: 'verifica-fonti', label: 'Verifica dei riferimenti' },
-  { key: 'salvataggio-audit', label: 'Salvataggio dell’audit' },
-  { key: 'proposta-revisione', label: 'Proposta di revisione' },
-  { key: 'piano-visuale', label: 'Piano visuale' },
-  { key: 'generazione-diagrammi', label: 'Generazione dei diagrammi' },
-  { key: 'richiesta-approvazione', label: 'Richiesta di approvazione' },
-  { key: 'attesa-approvazione', label: 'Attesa della decisione umana' },
-  { key: 'salvataggio-versione', label: 'Salvataggio della versione approvata' },
+/**
+ * I passaggi del workflow, nell'ordine in cui vengono eseguiti.
+ *
+ * Ogni voce porta con sé una riga che dice cosa succede lì. I nomi tecnici da
+ * soli — «verifica-fonti», «piano-visuale» — sono chiari a chi ha scritto il
+ * codice e opachi a chi guarda un'esecuzione andare avanti; e chi guarda vuole
+ * sapere due cose: a che punto siamo e se deve fare qualcosa.
+ */
+const STEPS: { key: string; label: string; nota: string }[] = [
+  {
+    key: 'caricamento-capitolo',
+    label: '1 · Caricamento del capitolo',
+    nota: 'Legge il testo corrente ed estrae titoli, codice, collegamenti e figure.',
+  },
+  {
+    key: 'stesura-capitolo',
+    label: '2 · Stesura del capitolo',
+    nota: 'Scrive il capitolo dalle fonti: prima la scaletta, poi una sezione per volta, infine riassunto, quiz e laboratorio.',
+  },
+  {
+    key: 'verifica-tecnica',
+    label: '3 · Analisi tecnica',
+    nota: 'Controlla i blocchi SQLX e JavaScript e individua le affermazioni da verificare.',
+  },
+  {
+    key: 'verifica-fonti',
+    label: '4 · Verifica dei riferimenti',
+    nota: 'Giudica le fonti citate e cerca la documentazione ufficiale per le affermazioni che ne sono prive.',
+  },
+  {
+    key: 'ricerca-biblioteca',
+    label: '5 · Ricerca nella biblioteca',
+    nota: 'Aggiunge alle proposte i documenti e i collegamenti che hai caricato tu.',
+  },
+  {
+    key: 'verifica-collegamenti',
+    label: '6 · Verifica dei collegamenti',
+    nota: 'Apre gli indirizzi proposti per accertare che rispondano davvero.',
+  },
+  {
+    key: 'salvataggio-audit',
+    label: '7 · Salvataggio dell’audit',
+    nota: 'Registra rilievi, citazioni e fonti proposte.',
+  },
+  {
+    key: 'proposta-revisione',
+    label: '8 · Proposta di revisione',
+    nota: 'Propone le correzioni come nuova versione: l’originale resta intatto.',
+  },
+  {
+    key: 'piano-visuale',
+    label: '9 · Piano visuale',
+    nota: 'Decide quali figure servono e dove.',
+  },
+  {
+    key: 'generazione-diagrammi',
+    label: '10 · Generazione dei diagrammi',
+    nota: 'Disegna i grafi delle dipendenze dal codice: esatti per costruzione, senza modello.',
+  },
+  {
+    key: 'richiesta-approvazione',
+    label: '11 · Richiesta di approvazione',
+    nota: 'Prepara il confronto fra la versione di partenza e quella proposta.',
+  },
+  {
+    key: 'attesa-approvazione',
+    label: '12 · Attesa della tua decisione',
+    nota: 'Il workflow è sospeso e non consuma risorse: riparte quando approvi o rifiuti dalla scheda Revisioni.',
+  },
+  {
+    key: 'salvataggio-versione',
+    label: '13 · Salvataggio della versione',
+    nota: 'Rende corrente la versione approvata.',
+  },
+  {
+    key: 'anteprima-volume',
+    label: '14 · Anteprima del volume',
+    nota: 'Ricompone il PDF del libro includendo il capitolo appena convalidato.',
+  },
 ];
 
 function formatDuration(ms: number | null): string {
@@ -80,6 +147,7 @@ export function WorkflowTimeline({
               >
                 {step.label}
               </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{step.nota}</p>
 
               {agentRun ? (
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

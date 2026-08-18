@@ -2,13 +2,14 @@
 
 import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Copy, X } from 'lucide-react';
+import { Check, Copy, Eye, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { decideAsset } from '@/lib/visual/actions';
 import type { AssetRow } from '@/lib/visual/queries';
+import { MermaidDiagram } from '@/components/visual/mermaid-diagram';
 
 const STATO = {
   draft: { label: 'bozza', tone: 'neutral' },
@@ -29,10 +30,15 @@ export function AssetCard({
   asset,
   signedUrl,
   onSelectVariant,
+  onPreview,
+  inAnteprima = false,
 }: {
   asset: AssetRow;
   signedUrl?: string;
   onSelectVariant?: (asset: AssetRow) => void;
+  /** Presente dove l'asset può essere provato prima di essere deciso. */
+  onPreview?: (asset: AssetRow) => void;
+  inAnteprima?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -60,9 +66,12 @@ export function AssetCard({
             className="size-full object-cover"
           />
         ) : asset.mermaid_source ? (
-          <pre className="size-full overflow-auto p-3 text-[10px] leading-tight">
-            <code>{asset.mermaid_source}</code>
-          </pre>
+          <MermaidDiagram
+            source={asset.mermaid_source}
+            title={asset.title}
+            mostraSorgente={false}
+            className="size-full overflow-auto p-2 [&>div]:border-0 [&>div]:bg-transparent"
+          />
         ) : (
           <span className="text-xs text-muted-foreground">Anteprima non disponibile</span>
         )}
@@ -127,6 +136,18 @@ export function AssetCard({
                 Rifiuta
               </Button>
             </>
+          ) : null}
+
+          {onPreview ? (
+            <Button
+              size="sm"
+              variant={inAnteprima ? 'primary' : 'secondary'}
+              aria-pressed={inAnteprima}
+              onClick={() => onPreview(asset)}
+            >
+              <Eye aria-hidden="true" />
+              {inAnteprima ? 'In anteprima' : 'Vedi in anteprima'}
+            </Button>
           ) : null}
 
           {asset.generator === 'ai' && onSelectVariant ? (

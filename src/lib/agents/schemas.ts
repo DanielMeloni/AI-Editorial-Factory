@@ -313,3 +313,123 @@ export const sourceDiscoveryOutputSchema = z.object({
 });
 
 export type SourceDiscoveryOutput = z.infer<typeof sourceDiscoveryOutputSchema>;
+
+// ---------------------------------------------------------------------------
+// Stesura del capitolo
+// ---------------------------------------------------------------------------
+
+/**
+ * Ingresso della stesura.
+ *
+ * L'agente riceve soltanto ciò su cui è autorizzato a basarsi: l'obiettivo del
+ * capitolo, le fonti disponibili e i loro estratti. Non ha accesso ad altro, ed
+ * è questa la garanzia — non una raccomandazione nel prompt.
+ */
+export const chapterDraftInputSchema = z.object({
+  chapterId: z.string().uuid(),
+  number: z.number().int().nullable(),
+  title: z.string(),
+  /** Obiettivo dichiarato in fase di struttura, quando c'è. */
+  objective: z.string().max(2000),
+  partTitle: z.string().nullable(),
+  language: z.string().max(20),
+  /** Direzione editoriale già tradotta in istruzioni per il modello. */
+  direzione: z.string().max(4000),
+  references: z
+    .array(
+      z.object({
+        title: z.string().max(300),
+        publisher: z.string().max(200).nullable(),
+        url: z.string().max(600).nullable(),
+      }),
+    )
+    .max(60),
+  /** Estratti dalle fonti e dall'archivio del manoscritto. */
+  evidence: z.string(),
+  /** Testo già presente: per un segnaposto è il solo titolo con l'obiettivo. */
+  existingContent: z.string(),
+});
+
+export type ChapterDraftInput = z.infer<typeof chapterDraftInputSchema>;
+
+export const chapterDraftOutputSchema = z.object({
+  /** Il capitolo intero in Markdown, intestazione compresa. */
+  contentMd: z.string().min(1),
+  /**
+   * Falso quando il modello ha dovuto scrivere qualcosa che le fonti non
+   * sostengono. Dichiararlo vale più che negarlo: il revisore sa dove guardare.
+   */
+  groundedOnly: z.boolean(),
+  /** Punti che le fonti non coprono e che restano da verificare a mano. */
+  gaps: z.array(z.string().max(500)).max(30),
+  confidence: z.number().min(0).max(1),
+  summary: z.string().max(2000),
+});
+
+export type ChapterDraftOutput = z.infer<typeof chapterDraftOutputSchema>;
+
+// ---------------------------------------------------------------------------
+// Stesura in più passaggi: piano, sezioni, apparato
+// ---------------------------------------------------------------------------
+
+/**
+ * Un capitolo completo non entra in una risposta sola.
+ *
+ * Chiedere «scrivi il capitolo» a un modello con un tetto di token produce un
+ * capitolo troncato o, peggio, un capitolo che si accorcia da solo per starci
+ * dentro: sezioni annunciate e mai scritte, esempi promessi e assenti. Si
+ * pianifica, si scrive una sezione per volta, si compone l'apparato. Ogni
+ * passaggio ha spazio sufficiente per essere completo.
+ */
+
+export const chapterPlanOutputSchema = z.object({
+  /** Obiettivi dichiarati in apertura, come vuole la convenzione del volume. */
+  objectives: z.array(z.string().max(300)).min(2).max(8),
+  sections: z
+    .array(
+      z.object({
+        title: z.string().min(3).max(200),
+        /** Cosa deve ottenere la sezione: guida chi la scriverà. */
+        intent: z.string().min(10).max(600),
+        needsCode: z.boolean(),
+        needsFigure: z.boolean(),
+      }),
+    )
+    .min(3)
+    .max(12),
+  confidence: z.number().min(0).max(1),
+});
+
+export type ChapterPlanOutput = z.infer<typeof chapterPlanOutputSchema>;
+
+export const chapterSectionOutputSchema = z.object({
+  /** La sola sezione, con il proprio titolo di secondo livello. */
+  contentMd: z.string().min(1),
+  /** Punti che le fonti non coprono, dichiarati invece che colmati. */
+  gaps: z.array(z.string().max(300)).max(10),
+});
+
+export type ChapterSectionOutput = z.infer<typeof chapterSectionOutputSchema>;
+
+export const chapterApparatusOutputSchema = z.object({
+  bestPractices: z.array(z.string().max(800)).max(8),
+  commonErrors: z.array(z.string().max(800)).max(8),
+  summary: z.string().max(4000),
+  keyPoints: z.array(z.string().max(400)).min(3).max(10),
+  quiz: z
+    .array(
+      z.object({
+        question: z.string().max(400),
+        options: z.array(z.string().max(300)).length(4),
+        /** Indice della risposta corretta, da 0 a 3. */
+        correct: z.number().int().min(0).max(3),
+      }),
+    )
+    .min(3)
+    .max(8),
+  /** Il laboratorio con cui si chiude ogni capitolo del volume. */
+  lab: z.string().max(4000),
+  gaps: z.array(z.string().max(300)).max(10),
+});
+
+export type ChapterApparatusOutput = z.infer<typeof chapterApparatusOutputSchema>;

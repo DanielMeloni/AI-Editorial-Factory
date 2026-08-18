@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { StatusPill } from '@/components/ui/status-pill';
 import { WorkflowTimeline } from '@/components/workflows/workflow-timeline';
 import { WorkflowControls } from '@/components/workflows/workflow-controls';
+import { LiveRefresh } from '@/components/workflows/live-refresh';
 import { getProject } from '@/lib/projects/queries';
 import { listAgentRuns, listWorkflowRuns } from '@/lib/workflows/queries';
 import { isTerminalStatus } from '@/lib/workflow/status';
@@ -21,6 +22,7 @@ export default async function WorkflowsPage({
   if (!project) notFound();
 
   const runs = await listWorkflowRuns(projectId);
+  const inCorso = runs.some((run) => !isTerminalStatus(run.status));
   const agentRunsPerRun = await Promise.all(runs.slice(0, 10).map((run) => listAgentRuns(run.id)));
 
   return (
@@ -29,6 +31,8 @@ export default async function WorkflowsPage({
         title="Workflow"
         description="Esecuzioni durevoli: proseguono anche a browser chiuso e sopravvivono a un nuovo deploy."
       />
+
+      <LiveRefresh projectId={projectId} attiva={inCorso} />
 
       {runs.length === 0 ? (
         <EmptyState

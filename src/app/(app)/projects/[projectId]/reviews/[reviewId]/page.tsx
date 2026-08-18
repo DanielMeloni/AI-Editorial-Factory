@@ -9,6 +9,7 @@ import { ReviewWorkbench } from '@/components/review/review-workbench';
 import { getProject } from '@/lib/projects/queries';
 import { getChapter, listChapterAssets, listChapterIssues } from '@/lib/workflows/queries';
 import { getReviewRequest, getVersion, listComments, listVersions } from '@/lib/review/queries';
+import { AssetApproval } from '@/components/review/asset-approval';
 
 const ORIGINE = {
   original: { label: 'Originale', tone: 'neutral' },
@@ -82,13 +83,32 @@ export default async function ReviewDetailPage({
         </Alert>
       ) : (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-          <ReviewWorkbench
-            reviewId={reviewId}
-            baseContent={base.content_md}
-            proposedContent={proposed.content_md}
-            comments={comments}
-            readOnly={readOnly}
-          />
+          <div className="space-y-4">
+            <ReviewWorkbench
+              reviewId={reviewId}
+              baseContent={base.content_md}
+              proposedContent={proposed.content_md}
+              comments={comments}
+              readOnly={readOnly}
+            />
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <ImageIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+                  Figure proposte
+                  {assets.length > 0 ? <Badge tone="neutral">{assets.length}</Badge> : null}
+                </CardTitle>
+                <CardDescription>
+                  Si approvano una per una, e separatamente dal testo: sono due giudizi diversi
+                  sulla stessa revisione.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <AssetApproval assets={assets} readOnly={readOnly} />
+              </CardContent>
+            </Card>
+          </div>
 
           <aside className="space-y-4">
             <Card>
@@ -122,37 +142,6 @@ export default async function ReviewDetailPage({
                       </li>
                     ))}
                   </ul>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <ImageIcon className="size-4 text-muted-foreground" aria-hidden="true" />
-                  Immagini proposte
-                  {assets.length > 0 ? <Badge tone="neutral">{assets.length}</Badge> : null}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {assets.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nessun asset proposto.</p>
-                ) : (
-                  assets.map((asset) => (
-                    <figure key={asset.id} className="space-y-1.5">
-                      <figcaption className="flex flex-wrap items-center gap-2 text-xs">
-                        <span className="font-medium text-foreground">{asset.title}</span>
-                        <Badge tone={asset.status === 'approved' ? 'success' : 'warning'}>
-                          {asset.status === 'approved' ? 'approvato' : 'da approvare'}
-                        </Badge>
-                      </figcaption>
-                      {asset.mermaid_source ? (
-                        <pre className="max-h-40 overflow-auto rounded border border-border-subtle bg-surface-muted p-2 text-[10px]">
-                          <code>{asset.mermaid_source}</code>
-                        </pre>
-                      ) : null}
-                    </figure>
-                  ))
                 )}
               </CardContent>
             </Card>

@@ -262,7 +262,7 @@ describe('coerenza fra fornitore e modello', () => {
     // Cambiare fornitore dimenticando il modello è una svista frequente, e
     // darebbe un errore oscuro dall'altra parte.
     const esito = searchModelFor('openai', 'claude-sonnet-5');
-    expect(esito.model).toBe('gpt-5.6-luna');
+    expect(esito.model).toBe('gpt-5.6');
     expect(esito.note).toMatch(/non è un modello openai/i);
   });
 });
@@ -366,12 +366,12 @@ describe('raccolta degli indirizzi da Gemini', () => {
 });
 
 describe('errori dell’API Gemini', () => {
-  it('distingue gli errori di quota o limite di frequenza', async () => {
+  it('spiega che la quota gratuita si azzera ogni giorno', async () => {
     const { describeGeminiError } = await import('@/lib/ai/search/gemini');
 
     expect(
       describeGeminiError(429, JSON.stringify({ error: { message: 'Quota exceeded' } })),
-    ).toMatch(/quota o limite di frequenza/i);
+    ).toMatch(/si azzera ogni giorno/i);
   });
 
   it('distingue una chiave rifiutata da un modello sbagliato', async () => {
@@ -385,25 +385,12 @@ describe('errori dell’API Gemini', () => {
     ).toMatch(/AI_SEARCH_MODEL/);
   });
 
-  it('suggerisce il modello corrente quando il precedente richiede billing', async () => {
+  it('suggerisce il modello con quota gratuita se ne serve uno a pagamento', async () => {
     const { describeGeminiError } = await import('@/lib/ai/search/gemini');
 
     expect(
       describeGeminiError(400, JSON.stringify({ error: { message: 'billing required' } })),
-    ).toMatch(/gemini-3\.6-flash/);
-  });
-
-  it('spiega quando un modello non è disponibile alle nuove utenze', async () => {
-    const { describeGeminiError } = await import('@/lib/ai/search/gemini');
-
-    const messaggio = describeGeminiError(
-      404,
-      JSON.stringify({
-        error: { message: 'This model is no longer available to new users.' },
-      }),
-    );
-    expect(messaggio).toMatch(/nuove utenze/i);
-    expect(messaggio).toMatch(/billing/i);
+    ).toMatch(/gemini-2\.5-flash/);
   });
 });
 
@@ -411,19 +398,25 @@ describe('coerenza del modello Gemini', () => {
   it('corregge un modello di un altro fornitore', async () => {
     const { searchModelFor } = await import('@/lib/ai/registry');
 
-    expect(searchModelFor('gemini', 'gemini-3.6-flash').note).toBeNull();
-    expect(searchModelFor('gemini', 'gpt-5.6').model).toBe('gemini-3.6-flash');
+    expect(searchModelFor('gemini', 'gemini-2.5-flash').note).toBeNull();
+    expect(searchModelFor('gemini', 'gpt-5.6').model).toBe('gemini-2.5-flash');
   });
+});
 
-  it('sostituisce il modello Pro non disponibile ai nuovi utenti', async () => {
-    const { searchModelFor } = await import('@/lib/ai/registry');
+// ---------------------------------------------------------------------------
+// «Non lo conosco» non è «non esiste»
+// ---------------------------------------------------------------------------
 
-    expect(searchModelFor('gemini', 'gemini-2.5-pro')).toMatchObject({
-      model: 'gemini-3.6-flash',
-    });
-    expect(searchModelFor('gemini', 'models/gemini-2.5-pro').note).toMatch(
-      /non è più disponibile/i,
-    );
+describe('sospetto contro verifica', () => {
+  it('una pagina ufficiale fuori dall’indice non è un difetto del capitolo', async () => {
+    const { lookupUrl, isOfficialDomain } = await import('@/lib/sources/catalog');
+    const url = 'https://docs.cloud.google.com/dataform/docs/best-practices-repositories';
+
+    // Questa pagina esiste davvero, ma non è censita: l'indice non è il mondo.
+    expect(lookupUrl(url)).toBeNull();
+    expect(isOfficialDomain(new URL(url).hostname, new URL(url).pathname)).toBe(true);
+
+    // È il motivo per cui l'audit apre i collegamenti invece di fermarsi a
+    // «non risulta»: la seconda domanda ha una risposta, la prima no.
   });
-
 });

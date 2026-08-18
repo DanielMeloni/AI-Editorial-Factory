@@ -91,6 +91,9 @@ export interface CoverRow {
   isbn: string | null;
   price: number | null;
   currency: string;
+  front_asset_id: string | null;
+  spine_asset_id: string | null;
+  back_asset_id: string | null;
 }
 
 export async function getCover(projectId: string): Promise<CoverRow | null> {
@@ -129,4 +132,71 @@ export async function getStyleGuide(projectId: string): Promise<StyleGuideRow | 
 
   if (error) throw new Error(`Lettura della guida di stile fallita: ${error.message}`);
   return data;
+}
+
+/** Le grafiche della copertina, già corredate del collegamento firmato. */
+export interface CoverArtworkRow {
+  asset: AssetRow;
+  /** Nullo quando il file non è raggiungibile: la scheda lo dichiara. */
+  signedUrl: string | null;
+}
+
+export async function listCoverArtwork(projectId: string): Promise<CoverArtworkRow[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('visual_assets')
+    .select('*')
+    .eq('project_id', projectId)
+    .in('kind', ['cover_front', 'cover_spine', 'cover_back'])
+    .neq('status', 'superseded')
+    .order('version', { ascending: false })
+    .returns<AssetRow[]>();
+
+  if (error) throw new Error(`Lettura delle grafiche di copertina fallita: ${error.message}`);
+
+  // Le firme scadono: si generano alla richiesta, non si conservano.
+  return Promise.all(
+    (data ?? []).map(async (asset) => {
+      if (!asset.storage_path) return { asset, signedUrl: null };
+      // Un'ora invece di cinque minuti: l'anteprima resta aperta mentre si
+      // confrontano le proposte, e un'immagine che sparisce a metà scelta
+      // sembrerebbe un guasto.
+      const { data: firmato } = await supabase.storage
+        .from(asset.storage_bucket ?? 'generated-assets')
+        .createSignedUrl(asset.storage_path, 3600);
+      return { asset, signedUrl: firmato?.signedUrl ?? null };
+    }),
+  );
+}
+
+/**
+ * Le immagini caricate come base della generazione.
+ *
+ * Non sono asset dell'opera e non compaiono fra le figure: vivono accanto alla
+ * copertina come materiale di direzione visuale.
+ */
+export async function listCoverReferences(projectId: string): Promise<CoverArtworkRow[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('visual_assets')
+    .select('*')
+    .eq('project_id', projectId)
+    .eq('kind', 'photo')
+    .eq('generator', 'upload')
+    .order('created_at', { ascending: true })
+    .returns<AssetRow[]>();
+
+  if (error) throw new Error(`Lettura dei riferimenti fallita: ${error.message}`);
+
+  return Promise.all(
+    (data ?? []).map(async (asset) => {
+      if (!asset.storage_path) return { asset, signedUrl: null };
+      const { data: firmato } = await supabase.storage
+        .from(asset.storage_bucket ?? 'generated-assets')
+        .createSignedUrl(asset.storage_path, 3600);
+      return { asset, signedUrl: firmato?.signedUrl ?? null };
+    }),
+  );
 }

@@ -6,6 +6,10 @@ import { CATALOG_ENTRIES } from '@/lib/sources/catalog';
 import { findSources, OFFICIAL_INDEX } from '@/lib/sources/match';
 import { researchClaims } from '@/lib/sources/research';
 import {
+  chapterApparatusOutputSchema,
+  chapterDraftInputSchema,
+  chapterPlanOutputSchema,
+  chapterSectionOutputSchema,
   chapterInputSchema,
   issueSchema,
   revisionOutputSchema,
@@ -16,6 +20,10 @@ import {
   technicalVerifierOutputSchema,
   verifiableClaimSchema,
   visualPlanOutputSchema,
+  type ChapterApparatusOutput,
+  type ChapterDraftInput,
+  type ChapterPlanOutput,
+  type ChapterSectionOutput,
   type ChapterInput,
   type Issue,
   type RevisionOutput,
@@ -50,6 +58,8 @@ export interface AgentDefinition<I, O> {
   inputSchema: z.ZodType<I>;
   outputSchema: z.ZodType<O>;
   system: string;
+  /** Tetto di token in uscita, dove il predefinito non basta. */
+  maxOutputTokens?: number;
   buildPrompt: (input: I) => string;
   /** Implementazione senza modello. Se presente, è quella usata in modalità mock. */
   deterministic?: (input: I) => O;
@@ -639,4 +649,205 @@ export const sourceDiscoveryAgent: AgentDefinition<SourceDiscoveryInput, SourceD
         'Selezione per dominio: senza un modello, la pertinenza all’argomento non viene valutata.',
     };
   },
+};
+
+// ===========================================================================
+// Stesura del capitolo — piano, sezioni, apparato
+// ===========================================================================
+
+/**
+ * Convenzioni redazionali della collana, ricavate dal volume già pubblicato.
+ *
+ * Stanno qui, in una costante sola, perché tre agenti diversi devono
+ * rispettarle allo stesso modo: se ognuno le ripetesse a modo suo, i capitoli
+ * generati divergerebbero fra loro prima ancora di divergere dal libro.
+ */
+const CONVENZIONI =
+  'Convenzioni della collana, da rispettare alla lettera:\n' +
+  '- Il codice inline indica file, tabelle, funzioni, parametri e valori.\n' +
+  '- I blocchi di codice mostrano SQLX, JavaScript o comandi completi; dove utile segue l’output atteso.\n' +
+  '- I riquadri si aprono con una riga «> **NOTA**», «> **SUGGERIMENTO**», «> **IMPORTANTE**» o ' +
+  '«> **ATTENZIONE**» e proseguono come citazione. NOTA approfondisce, SUGGERIMENTO indica una buona ' +
+  'pratica, IMPORTANTE fissa un concetto, ATTENZIONE segnala un errore comune o un rischio.\n' +
+  '- I segnaposto dei valori da sostituire sono in MAIUSCOLO_UNDERSCORE, come PROJECT_ID.\n' +
+  '- Le figure si dichiarano con «[IMMAGINE: descrizione di cosa deve mostrare]» seguito da una ' +
+  'didascalia «Figura N.x – titolo». L’immagine non si descrive a parole nel testo corrente.\n' +
+  '- Il caso di studio è l’e-commerce NordShop: progetto dataform-nordshop-lab, repository ' +
+  'nordshop-analytics, dataset raw, analytics e sandbox, tabelle raw.customers, raw.products, ' +
+  'raw.orders, raw.order_items. Non sono segnaposto: sono i nomi concreti da usare.\n' +
+  '- Non inserire mai «TODO» o «da completare»: una lacuna si dichiara in «gaps», non si nasconde nel testo.\n' +
+  '- Nel testo non compaiono URL, collegamenti né rimandi bibliografici. Le fonti sono raccolte '+
+  'in un capitolo di bibliografia a parte: nomina pure «la documentazione ufficiale di Dataform», '+
+  'ma senza indirizzo.';
+
+/**
+ * Piano del capitolo.
+ *
+ * Prima le sezioni, poi il testo. Il piano è ciò che permette di scrivere un
+ * capitolo lungo senza che si accorci da solo per entrare in una risposta.
+ */
+export const chapterPlanAgent: AgentDefinition<ChapterDraftInput, ChapterPlanOutput> = {
+  key: 'technical_writer',
+  name: 'Chapter Planner',
+  version: 1,
+  promptVersion: 'v1',
+  inputSchema: chapterDraftInputSchema,
+  outputSchema: chapterPlanOutputSchema,
+  maxOutputTokens: 4000,
+  system:
+    'Progetti la scaletta di un capitolo di manuale tecnico. Ti basi esclusivamente sugli estratti ' +
+    'forniti. Le sezioni procedono dal problema alla soluzione, poi ai componenti, poi al confronto ' +
+    'con le alternative: ogni sezione ha un compito distinto e nessuna ripete la precedente. ' +
+    'Dichiari in apertura da 3 a 6 obiettivi concreti, scritti come ciò che il lettore saprà fare. ' +
+    'Rispondi in italiano.',
+
+  buildPrompt: (input) =>
+    [
+      `Capitolo ${input.number ?? '—'}: ${input.title}`,
+      input.partTitle ? `Parte: ${input.partTitle}` : '',
+      input.objective ? `Obiettivo dichiarato in fase di struttura: ${input.objective}` : '',
+      '',
+      input.direzione,
+      '',
+      'Estratti disponibili:',
+      input.evidence || '(nessun estratto disponibile)',
+      '',
+      'Progetta da 4 a 8 sezioni di corpo. Non includere riassunto, punti chiave, quiz, ' +
+        'laboratorio o riferimenti: sono apparato e vengono composti a parte.',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+};
+
+export interface ChapterSectionInput extends ChapterDraftInput {
+  sectionTitle: string;
+  sectionIntent: string;
+  needsCode: boolean;
+  needsFigure: boolean;
+  /** Numero del capitolo e posizione, per numerare titoli e figure. */
+  sectionNumber: number;
+  /** Le altre sezioni, così che non si ripetano né si contraddicano. */
+  outline: string[];
+  objectives: string[];
+}
+
+export const chapterSectionInputSchema = chapterDraftInputSchema.extend({
+  sectionTitle: z.string().max(200),
+  sectionIntent: z.string().max(600),
+  needsCode: z.boolean(),
+  needsFigure: z.boolean(),
+  sectionNumber: z.number().int().positive(),
+  outline: z.array(z.string().max(200)).max(12),
+  objectives: z.array(z.string().max(300)).max(8),
+});
+
+/** Scrive una sezione per volta, con lo spazio per essere completa. */
+export const chapterSectionAgent: AgentDefinition<ChapterSectionInput, ChapterSectionOutput> = {
+  key: 'technical_writer',
+  name: 'Chapter Section Writer',
+  version: 1,
+  promptVersion: 'v1',
+  inputSchema: chapterSectionInputSchema as unknown as z.ZodType<ChapterSectionInput>,
+  outputSchema: chapterSectionOutputSchema,
+  maxOutputTokens: 8000,
+  system:
+    'Scrivi una singola sezione di un capitolo di manuale tecnico, per un lettore professionista. ' +
+    'Ti basi esclusivamente sugli estratti forniti: non aggiungi fatti, numeri, opzioni di ' +
+    'configurazione o limiti che non compaiano nelle fonti, e non inventi URL. Dove le fonti non ' +
+    'bastano lo annoti in «gaps» e prosegui. Non inserisci URL né collegamenti: le fonti vivono ' +
+    'nel capitolo di bibliografia. Scrivi dai 400 agli 800 parole: una sezione di tre ' +
+    'righe non è una sezione. Spieghi il perché prima del come, e usi analogie concrete quando ' +
+    'chiariscono. Rispondi in italiano.\n\n' +
+    CONVENZIONI,
+
+  buildPrompt: (input) =>
+    [
+      `Capitolo ${input.number ?? '—'}: ${input.title}`,
+      `Obiettivi del capitolo: ${input.objectives.join(' · ')}`,
+      '',
+      input.direzione,
+      '',
+      'Scaletta completa del capitolo — le altre sezioni esistono già o esisteranno, non invaderle:',
+      ...input.outline.map((titolo, indice) =>
+        `${indice + 1 === input.sectionNumber ? '→ ' : '  '}${input.number ?? ''}.${indice + 1} ${titolo}`,
+      ),
+      '',
+      `Sezione da scrivere: ${input.number ?? ''}.${input.sectionNumber} ${input.sectionTitle}`,
+      `Compito della sezione: ${input.sectionIntent}`,
+      input.needsCode
+        ? 'Questa sezione richiede almeno un blocco di codice completo ed eseguibile, con il linguaggio dichiarato.'
+        : '',
+      input.needsFigure
+        ? 'Questa sezione richiede una figura: dichiarala con [IMMAGINE: …] e la didascalia, senza descriverla nel testo corrente.'
+        : '',
+      '',
+      // Le fonti servono a sapere che cosa è vero, non a essere citate: gli
+      // indirizzi non arrivano nemmeno al modello, così non può inserirli.
+      'Fonti da cui proviene il materiale, per tua informazione — non citarle nel testo:',
+      ...(input.references.length > 0
+        ? input.references.map((r) => `- ${r.title}${r.publisher ? ` — ${r.publisher}` : ''}`)
+        : ['- Archivio del manoscritto']),
+      '',
+      'Estratti:',
+      input.evidence || '(nessun estratto disponibile)',
+      '',
+      `Restituisci la sola sezione, aperta dal titolo «## ${input.number ?? ''}.${input.sectionNumber} ${input.sectionTitle}».`,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+};
+
+export interface ChapterApparatusInput extends ChapterDraftInput {
+  objectives: string[];
+  outline: string[];
+  /** Il corpo già scritto: l'apparato deve parlare di quello, non di altro. */
+  body: string;
+}
+
+export const chapterApparatusInputSchema = chapterDraftInputSchema.extend({
+  objectives: z.array(z.string().max(300)).max(8),
+  outline: z.array(z.string().max(200)).max(12),
+  body: z.string(),
+});
+
+/**
+ * Apparato di chiusura: best practice, errori comuni, riassunto, punti chiave,
+ * quiz, laboratorio, riferimenti.
+ *
+ * Riceve il corpo già scritto perché deve riassumere quello. Un riassunto
+ * dedotto dalla scaletta riassumerebbe le intenzioni, non il capitolo.
+ */
+export const chapterApparatusAgent: AgentDefinition<
+  ChapterApparatusInput,
+  ChapterApparatusOutput
+> = {
+  key: 'technical_writer',
+  name: 'Chapter Apparatus',
+  version: 1,
+  promptVersion: 'v1',
+  inputSchema: chapterApparatusInputSchema as unknown as z.ZodType<ChapterApparatusInput>,
+  outputSchema: chapterApparatusOutputSchema,
+  maxOutputTokens: 8000,
+  system:
+    'Componi l’apparato di chiusura di un capitolo di manuale tecnico: best practice, errori ' +
+    'comuni, riassunto, punti chiave, quiz e laboratorio. Ti basi soltanto sul capitolo che ti ' +
+    'viene dato e sugli estratti: non introduci concetti che il capitolo non tratta. ' +
+    'Il quiz ha una sola risposta corretta per domanda e le tre alternative sono plausibili, non ' +
+    'assurde. Il laboratorio è un esercizio eseguibile in un progetto Google Cloud reale, con ' +
+    'obiettivo, passi e risultato atteso. Non produci alcuna bibliografia e non inserisci URL: ' +
+    'le fonti sono raccolte in un capitolo a parte. Rispondi in italiano.\n\n' +
+    CONVENZIONI,
+
+  buildPrompt: (input) =>
+    [
+      `Capitolo ${input.number ?? '—'}: ${input.title}`,
+      `Obiettivi dichiarati: ${input.objectives.join(' · ')}`,
+      '',
+      input.direzione,
+      '',
+      'Capitolo scritto:',
+      input.body.slice(0, 60_000),
+    ]
+      .filter(Boolean)
+      .join('\n'),
 };

@@ -111,8 +111,16 @@ export interface CoverPreviewOptions {
   barcodeSvg?: string | null;
   /** Mostra le linee guida di taglio e sicurezza. */
   showGuides?: boolean;
-  /** Colori di fondo dei pannelli, in attesa dell'immagine generata. */
+  /** Colori di fondo dei pannelli, usati dove non c'è un'immagine. */
   background?: { front: string; back: string; spine: string };
+  /**
+   * Grafiche approvate o in prova, un indirizzo per pannello.
+   *
+   * Vengono disegnate sotto la tipografia e ritagliate sul pannello, mai
+   * deformate: una copertina schiacciata mostrerebbe una proporzione che in
+   * stampa non esisterà.
+   */
+  artwork?: { front?: string | null; spine?: string | null; back?: string | null };
 }
 
 /**
@@ -135,6 +143,8 @@ export function buildCoverPreviewSvg(
     spine: '#101a2e',
   };
 
+  const grafiche = options.artwork ?? {};
+
   const parti: string[] = [];
 
   parti.push(
@@ -142,6 +152,18 @@ export function buildCoverPreviewSvg(
     panel(layout.back, sfondo.back),
     panel(layout.spine, sfondo.spine),
     panel(layout.front, sfondo.front),
+  );
+
+  // Le immagini stanno sotto: il testo è tipografia e deve restare sopra,
+  // leggibile. La velatura non è un effetto estetico — senza, l'anteprima
+  // prometterebbe una leggibilità che su una grafica chiara non ci sarebbe.
+  parti.push(
+    image(layout.back, grafiche.back, 'quarta'),
+    image(layout.spine, grafiche.spine, 'dorso'),
+    image(layout.front, grafiche.front, 'fronte'),
+    velatura(layout.back, grafiche.back, 0.55),
+    velatura(layout.spine, grafiche.spine, 0.45),
+    velatura(layout.front, grafiche.front, 0.4),
   );
 
   // --- Fronte -------------------------------------------------------------
@@ -249,6 +271,34 @@ export function buildCoverPreviewSvg(
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Immagine ritagliata sul pannello.
+ *
+ * `slice` riempie il riquadro conservando le proporzioni e tagliando ciò che
+ * eccede: è quello che farà la stampa, e l'anteprima deve dire la verità su
+ * quanto andrà perso.
+ */
+function image(rect: Rect, href: string | null | undefined, nome: string): string {
+  if (!href) return '';
+  const id = `ritaglio-${nome}`;
+  return (
+    `<clipPath id="${id}"><rect x="${round2(rect.x)}" y="${round2(rect.y)}" ` +
+    `width="${round2(rect.width)}" height="${round2(rect.height)}"/></clipPath>` +
+    `<image href="${esc(href)}" x="${round2(rect.x)}" y="${round2(rect.y)}" ` +
+    `width="${round2(rect.width)}" height="${round2(rect.height)}" ` +
+    `preserveAspectRatio="xMidYMid slice" clip-path="url(#${id})"/>`
+  );
+}
+
+/** Velo scuro sopra l'immagine: è ciò che tiene leggibile il testo bianco. */
+function velatura(rect: Rect, href: string | null | undefined, opacita: number): string {
+  if (!href) return '';
+  return (
+    `<rect x="${round2(rect.x)}" y="${round2(rect.y)}" width="${round2(rect.width)}" ` +
+    `height="${round2(rect.height)}" fill="#0b1220" opacity="${opacita}"/>`
+  );
+}
 
 function panel(rect: Rect, fill: string): string {
   return `<rect x="${rect.x}" y="${rect.y}" width="${rect.width}" height="${rect.height}" fill="${fill}"/>`;

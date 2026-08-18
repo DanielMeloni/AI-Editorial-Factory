@@ -310,3 +310,129 @@ export async function exportPdf(
   const buffer = await renderToBuffer(documento);
   return new Uint8Array(buffer);
 }
+
+// ---------------------------------------------------------------------------
+// Anteprima del volume
+// ---------------------------------------------------------------------------
+
+export interface VolumeChapterInput {
+  label: string;
+  title: string;
+  contentMd: string;
+  versionNo: number;
+}
+
+export interface VolumeMeta {
+  projectTitle: string;
+  subtitle: string | null;
+  author: string;
+  volume: string | null;
+  /** Passata da fuori: un documento deve poter essere rigenerato identico. */
+  generatedAt: string;
+  /** Capitoli esistenti ma non ancora convalidati. */
+  pending: number;
+}
+
+/**
+ * Il volume intero, come si presenterà stampato.
+ *
+ * Ogni capitolo apre una pagina nuova, come in tipografia: l'anteprima serve a
+ * giudicare il libro, e un libro in cui i capitoli si accavallano non è il
+ * libro che si stamperà.
+ *
+ * Il frontespizio dichiara che si tratta di un'anteprima e quanti capitoli
+ * mancano ancora. Un PDF che sembra finito e non lo è è peggio di nessun PDF.
+ */
+export async function exportVolumePdf(
+  chapters: VolumeChapterInput[],
+  meta: VolumeMeta,
+): Promise<Uint8Array> {
+  const documento = (
+    <Document
+      title={`${meta.projectTitle}${meta.volume ? ` — ${meta.volume}` : ''}`}
+      author={meta.author}
+      creator="AI Editorial Factory"
+      producer="AI Editorial Factory"
+      language="it"
+    >
+      {/* Frontespizio */}
+      <Page size="A4" style={styles.page}>
+        <View style={{ marginTop: 140 }}>
+          <Text style={styles.eyebrow}>ANTEPRIMA DI LAVORAZIONE</Text>
+          <Text style={{ ...styles.titolo, fontSize: 30 }}>{meta.projectTitle}</Text>
+          {meta.subtitle ? (
+            <Text style={{ fontSize: 14, color: colori.tenue, marginBottom: 14 }}>
+              {meta.subtitle}
+            </Text>
+          ) : null}
+          <Text style={styles.metaTesta}>
+            {[meta.author, meta.volume].filter(Boolean).join('  ·  ')}
+          </Text>
+          <Text style={{ fontSize: 9, color: colori.tenue, fontFamily: 'Helvetica' }}>
+            Composta il {meta.generatedAt} · {chapters.length}{' '}
+            {chapters.length === 1 ? 'capitolo convalidato' : 'capitoli convalidati'}
+            {meta.pending > 0
+              ? ` · ${meta.pending} ancora da convalidare, non inclusi`
+              : ' · nessun capitolo in attesa'}
+          </Text>
+        </View>
+      </Page>
+
+      {/* Indice */}
+      {chapters.length > 0 ? (
+        <Page size="A4" style={styles.page}>
+          <Text style={styles.titolo}>Indice</Text>
+          {chapters.map((capitolo, indice) => (
+            <View key={`toc-${indice}`} style={styles.vocElenco}>
+              <Text style={{ ...styles.segno, width: 90, fontFamily: 'Helvetica', fontSize: 9 }}>
+                {capitolo.label}
+              </Text>
+              <Text style={styles.vocTesto}>{capitolo.title}</Text>
+            </View>
+          ))}
+          <View style={styles.piede} fixed>
+            <Text>{meta.projectTitle}</Text>
+            <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
+          </View>
+        </Page>
+      ) : null}
+
+      {/* Capitoli */}
+      {chapters.map((capitolo, indice) => {
+        const albero = unified()
+          .use(remarkParse)
+          .use(remarkGfm)
+          .parse(capitolo.contentMd) as Root;
+
+        return (
+          <Page key={`cap-${indice}`} size="A4" style={styles.page}>
+            {capitolo.label ? <Text style={styles.eyebrow}>{capitolo.label.toUpperCase()}</Text> : null}
+            <Text style={styles.titolo}>{capitolo.title}</Text>
+            <Text style={styles.metaTesta}>versione {capitolo.versionNo}</Text>
+
+            {albero.children.map((node, i) => renderBlock(node, `c${indice}-b${i}`))}
+
+            <View style={styles.piede} fixed>
+              <Text>{meta.projectTitle}</Text>
+              <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
+            </View>
+          </Page>
+        );
+      })}
+
+      {/* Un volume senza capitoli convalidati lo dice, invece di essere vuoto */}
+      {chapters.length === 0 ? (
+        <Page size="A4" style={styles.page}>
+          <Text style={styles.titolo}>Nessun capitolo convalidato</Text>
+          <Text style={styles.paragrafo}>
+            L’anteprima raccoglie i capitoli approvati. Approva una revisione dalla scheda
+            Revisioni e il capitolo comparirà qui.
+          </Text>
+        </Page>
+      ) : null}
+    </Document>
+  );
+
+  const buffer = await renderToBuffer(documento);
+  return new Uint8Array(buffer);
+}

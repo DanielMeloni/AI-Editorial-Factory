@@ -2596,3 +2596,111 @@ comment on column public.reference_sources.added_by is
 create index reference_sources_proposed_idx
   on public.reference_sources (project_id, priority, created_at desc)
   where status = 'proposed';
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ▶ 20260817220001_realtime.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ---------------------------------------------------------------------------
+-- Realtime: pubblicazione delle tabelle che alimentano lo stato dal vivo
+-- ---------------------------------------------------------------------------
+--
+-- Senza questa pubblicazione il browser non riceve nulla e la pagina resta
+-- ferma finché non la si ricarica a mano. Le policy di lettura già in vigore
+-- continuano a valere: Realtime consegna un cambiamento soltanto a chi avrebbe
+-- potuto leggerne la riga con una select. Pubblicare una tabella non allarga
+-- quindi la visibilità, la estende nel tempo.
+--
+-- La replica identity resta quella predefinita, la chiave primaria: agli
+-- ascoltatori serve la riga nuova, non quella vecchia, e `full` scriverebbe nel
+-- WAL molto più del necessario.
+
+do $$
+begin
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    create publication supabase_realtime;
+  end if;
+end;
+$$;
+
+do $$
+declare
+  t text;
+  tabelle text[] := array['workflow_runs', 'agent_runs', 'review_requests'];
+begin
+  foreach t in array tabelle loop
+    if not exists (
+      select 1
+      from pg_publication_tables
+      where pubname = 'supabase_realtime'
+        and schemaname = 'public'
+        and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ▶ 20260817230001_editorial_direction.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ---------------------------------------------------------------------------
+-- Direzione editoriale del progetto: livello, tono, registro
+-- ---------------------------------------------------------------------------
+--
+-- Tre volumi sullo stesso argomento non si distinguono per il titolo: si
+-- distinguono per a chi parlano e come. Questi valori entrano nei prompt del
+-- Curriculum Agent e del Chapter Drafter, e sono la sola ragione per cui
+-- «Dataform base» e «Dataform avanzato» non producono lo stesso libro.
+--
+-- Sono liste chiuse di proposito. Un tono scritto a mano ogni volta farebbe
+-- divergere i volumi per come sono stati descritti invece che per il livello,
+-- e il confronto fra loro non direbbe più nulla. Le sfumature che la lista non
+-- copre vanno in `style_notes`, dove si vedono e si possono correggere.
+--
+-- La migrazione è riscrivibile: in questo progetto capita di applicarla
+-- incollandola nell'editor SQL, e una seconda esecuzione non deve fallire.
+
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'editorial_level') then
+    create type editorial_level as enum ('base', 'intermediate', 'advanced');
+  end if;
+end;
+$$;
+
+alter table public.projects
+  add column if not exists level       editorial_level not null default 'base',
+  add column if not exists tone        text not null default 'didattico',
+  add column if not exists register    text not null default 'tecnico_operativo',
+  add column if not exists style_notes text;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'projects_tone_allowed'
+  ) then
+    alter table public.projects
+      add constraint projects_tone_allowed
+        check (tone in ('didattico', 'professionale', 'discorsivo', 'conciso'));
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint where conname = 'projects_register_allowed'
+  ) then
+    alter table public.projects
+      add constraint projects_register_allowed
+        check (register in ('divulgativo', 'tecnico_operativo', 'rigoroso_formale'));
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint where conname = 'projects_style_notes_length'
+  ) then
+    alter table public.projects
+      add constraint projects_style_notes_length
+        check (style_notes is null or char_length(style_notes) <= 2000);
+  end if;
+end;
+$$;

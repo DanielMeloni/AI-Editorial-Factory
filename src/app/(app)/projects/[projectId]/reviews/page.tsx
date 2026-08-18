@@ -7,6 +7,9 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { getProject } from '@/lib/projects/queries';
 import { listReviewRequests } from '@/lib/review/queries';
+import { listWorkflowRuns } from '@/lib/workflows/queries';
+import { isTerminalStatus } from '@/lib/workflow/status';
+import { LiveRefresh } from '@/components/workflows/live-refresh';
 
 const STATO = {
   pending: { label: 'In attesa di decisione', tone: 'warning' },
@@ -24,8 +27,15 @@ export default async function ReviewsPage({
   const project = await getProject(projectId);
   if (!project) notFound();
 
-  const reviews = await listReviewRequests(projectId);
+  const [reviews, runs] = await Promise.all([
+    listReviewRequests(projectId),
+    listWorkflowRuns(projectId),
+  ]);
   const inAttesa = reviews.filter((r) => r.status === 'pending');
+
+  // Qui l'ascolto serve soprattutto quando l'elenco è ancora vuoto: la
+  // revisione deve comparire da sé nel momento in cui il workflow la chiede.
+  const inCorso = runs.some((run) => !isTerminalStatus(run.status));
 
   return (
     <main id="contenuto-principale" className="flex-1 space-y-6 p-4 sm:p-6">
@@ -37,6 +47,8 @@ export default async function ReviewsPage({
             : 'Nessun contenuto viene pubblicato senza approvazione umana.'
         }
       />
+
+      <LiveRefresh projectId={projectId} attiva={inCorso} />
 
       {reviews.length === 0 ? (
         <EmptyState

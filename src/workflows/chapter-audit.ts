@@ -2,8 +2,10 @@ import { approvalHook } from './hooks';
 import {
   applyDecision,
   auditSources,
+  draftChapter,
   enrichWithLibrary,
   finishRun,
+  verifyCitations,
   generateDiagrams,
   loadChapter,
   markStep,
@@ -11,6 +13,7 @@ import {
   planVisuals,
   proposeRevision,
   requestApproval,
+  updateVolumePreview,
   verifyTechnical,
   type RunContext,
 } from './chapter-audit-steps';
@@ -40,7 +43,7 @@ import {
  *  14. gli output editoriali arrivano con la Fase 6
  */
 
-const TOTAL_STEPS = 13;
+const TOTAL_STEPS = 14;
 
 export interface ChapterAuditInput extends RunContext {
   /** Token opaco con cui riprendere l'esecuzione dopo la decisione umana. */
@@ -62,50 +65,78 @@ export async function chapterAuditWorkflow(input: ChapterAuditInput) {
     await markStep(context.workflowRunId, 'caricamento-capitolo', 1, TOTAL_STEPS);
     const loaded = await loadChapter(context);
 
+    // La stesura precede l'audit: verificare un segnaposto significa
+    // verificare niente, e chiedere un'approvazione su di esso significa
+    // chiedere a una persona di decidere sul nulla.
+    await markStep(context.workflowRunId, 'stesura-capitolo', 2, TOTAL_STEPS);
+    const stesura = await draftChapter(context, loaded.chapter, loaded.versionId);
+
     await markStep(context.workflowRunId, 'verifica-tecnica', 3, TOTAL_STEPS);
-    const technical = await verifyTechnical(context, loaded.chapter);
+    const technical = await verifyTechnical(context, stesura.chapter);
 
     await markStep(context.workflowRunId, 'verifica-fonti', 4, TOTAL_STEPS);
-    const sources = await auditSources(context, loaded.chapter, technical.claims);
+    const sources = await auditSources(context, stesura.chapter, technical.claims);
 
     await markStep(context.workflowRunId, 'ricerca-biblioteca', 5, TOTAL_STEPS);
     const library = await enrichWithLibrary(context, technical.claims, sources.suggestions);
 
-    await markStep(context.workflowRunId, 'salvataggio-audit', 6, TOTAL_STEPS);
-    const audit = await persistAudit(context, technical, sources, library.suggestions);
+    await markStep(context.workflowRunId, 'verifica-collegamenti', 6, TOTAL_STEPS);
+    const links = await verifyCitations(context, sources.citations);
 
-    await markStep(context.workflowRunId, 'proposta-revisione', 7, TOTAL_STEPS);
-    const revision = await proposeRevision(
+    await markStep(context.workflowRunId, 'salvataggio-audit', 7, TOTAL_STEPS);
+    const audit = await persistAudit(
       context,
-      loaded.chapter,
-      [...technical.issues, ...sources.issues],
+      technical,
+      sources,
       library.suggestions,
-      loaded.versionId,
+      links.issues,
+      links.verified,
     );
 
-    await markStep(context.workflowRunId, 'piano-visuale', 8, TOTAL_STEPS);
-    const visualPlan = await planVisuals(context, loaded.chapter, technical.dataformRefs);
+    await markStep(context.workflowRunId, 'proposta-revisione', 8, TOTAL_STEPS);
+    const revision = await proposeRevision(
+      context,
+      stesura.chapter,
+      [...technical.issues, ...sources.issues],
+      library.suggestions,
+      stesura.versionId,
+    );
 
-    await markStep(context.workflowRunId, 'generazione-diagrammi', 9, TOTAL_STEPS);
+    // Se l'audit non ha trovato nulla da correggere resta comunque la stesura
+    // da approvare: senza questo, un capitolo appena scritto arriverebbe alla
+    // decisione senza nulla da confrontare.
+    const versioneProposta = revision.versionId ?? stesura.versionId;
+
+    await markStep(context.workflowRunId, 'piano-visuale', 9, TOTAL_STEPS);
+    const visualPlan = await planVisuals(context, stesura.chapter, technical.dataformRefs);
+
+    await markStep(context.workflowRunId, 'generazione-diagrammi', 10, TOTAL_STEPS);
     const diagrams = await generateDiagrams(
       context,
-      loaded.chapter.title,
+      stesura.chapter.title,
       technical.dataformRefs,
       loaded.isIncremental,
     );
 
-    await markStep(context.workflowRunId, 'richiesta-approvazione', 10, TOTAL_STEPS);
+    await markStep(context.workflowRunId, 'richiesta-approvazione', 11, TOTAL_STEPS);
     const reviewRequestId = await requestApproval(
       context,
       loaded.versionId,
-      revision.versionId,
+      versioneProposta,
       input.resumeToken,
-      `${audit.issueCount} rilievi, ${audit.suggestions} fonti ufficiali proposte, ` +
+      `Capitolo scritto dalle fonti: ${stesura.chapter.contentMd.split(/\s+/).filter(Boolean).length} parole. ` +
+        `${audit.issueCount} rilievi, ${audit.suggestions} fonti ufficiali proposte, ` +
         `${revision.changeCount} interventi proposti, ${diagrams.assetIds.length} diagrammi, ` +
-        `${visualPlan.items.length} figure previste.`,
+        `${visualPlan.items.length} figure previste.` +
+        (stesura.gaps.length > 0
+          ? ` ${stesura.gaps.length} punti che le fonti non coprono: ${stesura.gaps.slice(0, 3).join('; ')}`
+          : ''),
     );
 
     // --- Sospensione: si riprende solo con una decisione umana. -------------
+    // Va segnalata come passaggio: per chi guarda, «in attesa» è
+    // un'informazione, non un vuoto fra due righe.
+    await markStep(context.workflowRunId, 'attesa-approvazione', 12, TOTAL_STEPS);
     const events = approvalHook.create({ token: input.resumeToken });
 
     let approvedVersionId: string | null = null;
@@ -116,7 +147,7 @@ export async function chapterAuditWorkflow(input: ChapterAuditInput) {
       const outcome = await applyDecision(
         context,
         reviewRequestId,
-        revision.versionId,
+        versioneProposta,
         event.decision,
         event.note ?? null,
         event.decidedBy ?? null,
@@ -127,16 +158,28 @@ export async function chapterAuditWorkflow(input: ChapterAuditInput) {
 
     await markStep(context.workflowRunId, 'salvataggio-versione', 13, TOTAL_STEPS);
 
+    // Ultimo passaggio: il capitolo appena convalidato smette di essere un
+    // capitolo a sé e diventa parte del libro. È il momento in cui il progresso
+    // si vede — un elenco di capitoli approvati non lo mostra allo stesso modo.
+    await markStep(context.workflowRunId, 'anteprima-volume', 14, TOTAL_STEPS);
+    const anteprima = await updateVolumePreview(context);
+
     const esito = {
       decision: decisione,
       approvedVersionId,
-      proposedVersionId: revision.versionId,
+      proposedVersionId: versioneProposta,
+      draftedVersionId: stesura.versionId,
+      draftGaps: stesura.gaps,
+      previewChapters: anteprima.chapters,
+      previewWords: anteprima.words,
+      previewOk: anteprima.ok,
       reviewRequestId,
       issues: audit.issueCount,
       critical: audit.critical,
       high: audit.high,
       claims: technical.claims.length,
       citations: sources.citations.length,
+      brokenLinks: links.broken,
       suggestedSources: audit.suggestions,
       unmatchedClaims:
         library.libraryEntries > 0 ? library.unmatched : sources.unmatchedClaims,

@@ -48,6 +48,14 @@ export interface TextProvider {
 
 export interface ImageRequest {
   prompt: string;
+  /**
+   * Immagini da cui partire, non da copiare.
+   *
+   * Servono a fissare stile, palette e composizione: il modello le riceve come
+   * base e produce qualcosa di coerente con esse. Senza, ogni generazione
+   * ripartirebbe da una direzione visuale diversa.
+   */
+  references?: { bytes: Uint8Array; mimeType: string }[];
   negativePrompt?: string;
   width: number;
   height: number;

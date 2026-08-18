@@ -158,7 +158,7 @@ Elenco completo e commentato in [`.env.example`](.env.example).
 | `AI_TEXT_PROVIDER` / `AI_TEXT_MODEL` | no (default `mock`) | — |
 | `AI_IMAGE_PROVIDER` / `AI_IMAGE_MODEL` | no (default `mock`) | — |
 | `AI_SEARCH_PROVIDER` / `AI_SEARCH_MODEL` | no (default `mock`) | `mock` non cerca e non inventa; `gemini`, `anthropic` o `openai` cercano davvero |
-| `GEMINI_API_KEY` | solo se provider `gemini` | aistudio.google.com/apikey — per le nuove utenze il grounding richiede billing |
+| `GEMINI_API_KEY` | solo se provider `gemini` | aistudio.google.com/apikey — quota di ricerca gratuita |
 | `OPENAI_API_KEY` | solo se provider `openai` | platform.openai.com/api-keys |
 | `ANTHROPIC_API_KEY` | solo se provider `anthropic` | console.anthropic.com/settings/keys |
 
@@ -287,7 +287,7 @@ non viene mai modificato.
 ```
 npm run lint       0 errori
 npm run typecheck  0 errori
-npm test           468 test su 30 file
+npm test           469 test su 30 file
 npm run build      26 rotte
 npm run test:smoke 22 controlli HTTP su build di produzione
 ```

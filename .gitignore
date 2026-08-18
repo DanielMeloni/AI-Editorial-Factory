@@ -18,7 +18,7 @@ next-env.d.ts
 
 # variabili di ambiente - NESSUN segreto deve entrare nel repository
 .env
-.env.local
+.env.*
 .env.*.local
 .env.development
 .env.production

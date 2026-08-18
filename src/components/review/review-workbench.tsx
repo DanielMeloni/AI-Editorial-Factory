@@ -9,6 +9,7 @@ import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DiffViewer } from './diff-viewer';
+import { SplitDiffViewer } from './split-diff-viewer';
 import { computeDiff, summarizeDiff } from '@/lib/review/diff';
 import {
   addComment,
@@ -20,7 +21,7 @@ import {
 } from '@/lib/review/actions';
 import type { CommentRow } from '@/lib/review/queries';
 
-type Vista = 'diff' | 'originale' | 'proposta' | 'modifica';
+type Vista = 'affiancato' | 'diff' | 'originale' | 'proposta' | 'modifica';
 
 export function ReviewWorkbench({
   reviewId,
@@ -45,7 +46,9 @@ export function ReviewWorkbench({
   const [selected, setSelected] = useState<Set<number>>(
     () => new Set(diff.hunks.map((h) => h.id)),
   );
-  const [vista, setVista] = useState<Vista>('diff');
+  // Chi approva guarda prima il capitolo intero, e solo dopo il dettaglio
+  // della singola modifica: l'affiancato è la vista d'ingresso.
+  const [vista, setVista] = useState<Vista>('affiancato');
   const [nota, setNota] = useState('');
   const [bozza, setBozza] = useState(proposedContent);
   const [commento, setCommento] = useState('');
@@ -71,7 +74,8 @@ export function ReviewWorkbench({
   }
 
   const VISTE: { key: Vista; label: string }[] = [
-    { key: 'diff', label: 'Confronto' },
+    { key: 'affiancato', label: 'Affiancato' },
+    { key: 'diff', label: 'In linea' },
     { key: 'originale', label: 'Originale' },
     { key: 'proposta', label: 'Proposta' },
     { key: 'modifica', label: 'Modifica manuale' },
@@ -131,6 +135,14 @@ export function ReviewWorkbench({
             <Alert tone="info">
               Le due versioni sono identiche: la proposta non introduce alcuna modifica.
             </Alert>
+          ) : vista === 'affiancato' ? (
+            <SplitDiffViewer
+              lines={diff.lines}
+              hunks={diff.hunks}
+              selected={selected}
+              onToggle={toggle}
+              readOnly={readOnly}
+            />
           ) : vista === 'diff' ? (
             <DiffViewer
               lines={diff.lines}

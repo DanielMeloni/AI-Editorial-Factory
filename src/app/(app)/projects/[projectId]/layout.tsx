@@ -4,6 +4,7 @@ import { Topbar } from '@/components/layout/topbar';
 import { ProjectTabs } from '@/components/projects/project-tabs';
 import { requireUser } from '@/lib/auth/guards';
 import { getProject } from '@/lib/projects/queries';
+import { getProjectProgress, statiSchede } from '@/lib/projects/progress';
 
 export default async function ProjectLayout({
   children,
@@ -20,6 +21,10 @@ export default async function ProjectLayout({
   // diventa un 404, senza rivelare se il progetto esista in un'altra organizzazione.
   if (!project) notFound();
 
+  // Lo stato delle tappe accompagna la navigazione: la barra dice a che punto
+  // è il lavoro anche quando si sta guardando tutt'altro.
+  const progresso = await getProjectProgress(projectId);
+
   return (
     <>
       <Topbar
@@ -27,7 +32,7 @@ export default async function ProjectLayout({
         crumbs={[{ label: 'Progetti', href: '/projects' }, { label: project.title }]}
       />
       <div className="border-b border-border-subtle bg-surface px-4 sm:px-6">
-        <ProjectTabs projectId={projectId} />
+        <ProjectTabs projectId={projectId} stati={statiSchede(progresso)} />
       </div>
       {children}
     </>
