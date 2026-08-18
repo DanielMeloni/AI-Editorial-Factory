@@ -75,31 +75,6 @@ export async function generateIllustration(
 
   const { provider, degraded } = getImageProvider();
 
-  // I riferimenti visivi caricati dall'autore sono la base della generazione:
-  // senza, ogni esecuzione ripartirebbe da una direzione visuale diversa.
-  const { data: riferimenti } = await supabase
-    .from('visual_assets')
-    .select('storage_bucket, storage_path')
-    .eq('project_id', projectId)
-    .eq('kind', 'photo')
-    .eq('generator', 'upload')
-    .order('created_at', { ascending: true })
-    .limit(8)
-    .returns<{ storage_bucket: string | null; storage_path: string | null }[]>();
-
-  const basi: { bytes: Uint8Array; mimeType: string }[] = [];
-  for (const riferimento of riferimenti ?? []) {
-    if (!riferimento.storage_path) continue;
-    const { data: file } = await supabase.storage
-      .from(riferimento.storage_bucket ?? 'generated-assets')
-      .download(riferimento.storage_path);
-    if (!file) continue;
-    basi.push({
-      bytes: new Uint8Array(await file.arrayBuffer()),
-      mimeType: file.type || 'image/png',
-    });
-  }
-
   let immagine;
   try {
     immagine = await provider.generate({
@@ -524,6 +499,30 @@ export async function generateCoverArtwork(projectId: string): Promise<VisualAct
   if (!limite.allowed) return { ok: false, message: limite.message };
 
   const { provider, degraded } = getImageProvider();
+  // I riferimenti visivi caricati dall'autore sono la base della generazione:
+  // senza, ogni esecuzione ripartirebbe da una direzione visuale diversa.
+  const { data: riferimenti } = await supabase
+    .from('visual_assets')
+    .select('storage_bucket, storage_path')
+    .eq('project_id', projectId)
+    .eq('kind', 'photo')
+    .eq('generator', 'upload')
+    .order('created_at', { ascending: true })
+    .limit(8)
+    .returns<{ storage_bucket: string | null; storage_path: string | null }[]>();
+
+  const basi: { bytes: Uint8Array; mimeType: string }[] = [];
+  for (const riferimento of riferimenti ?? []) {
+    if (!riferimento.storage_path) continue;
+    const { data: file } = await supabase.storage
+      .from(riferimento.storage_bucket ?? 'generated-assets')
+      .download(riferimento.storage_path);
+    if (!file) continue;
+    basi.push({
+      bytes: new Uint8Array(await file.arrayBuffer()),
+      mimeType: file.type || 'image/png',
+    });
+  }
 
   // La direzione visuale è unica per le tre parti: è ciò che le tiene insieme
   // quando il libro viene chiuso.

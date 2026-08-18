@@ -123,11 +123,11 @@ export async function getProjectProgress(projectId: string): Promise<ProgressoPr
     {
       key: 'copertina',
       label: 'Copertina',
-      azione: copertina
+      azione: copertina.data
         ? 'Genera le grafiche e approva quelle che ti convincono'
         : 'Imposta formato, dorso e testi della copertina',
       href: `${base}/cover-studio`,
-      fatta: Boolean(copertina?.front_asset_id) && (grafiche.count ?? 0) === 0,
+      fatta: Boolean(copertina.data?.front_asset_id) && (grafiche.count ?? 0) === 0,
       dettaglio:
         (grafiche.count ?? 0) > 0 ? `${grafiche.count} grafiche da approvare` : null,
     },

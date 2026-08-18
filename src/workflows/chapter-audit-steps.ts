@@ -13,6 +13,7 @@ import {
 } from '@/lib/agents/definitions';
 import { analyzeMarkdown } from '@/lib/ingest/markdown';
 import { istruzioniEditoriali } from '@/lib/editorial/direzione';
+import { rebuildVolumePreviewWith } from '@/lib/publish/preview';
 import { buildProjectIndex } from '@/lib/sources/library';
 import { mergeSuggestions, researchClaims } from '@/lib/sources/research';
 import { verifyUrls } from '@/lib/sources/verify-url';
