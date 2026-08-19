@@ -102,33 +102,73 @@ Il codice a barre va in basso a destra sulla quarta, dentro il margine di
 sicurezza: è la collocazione che i distributori si aspettano. Se il dorso è
 sotto i 6 mm, il testo verticale viene omesso perché non sarebbe leggibile.
 
-## 6. Codice a barre ISBN
+## 6. ISBN, senza codice a barre in copertina
 
-Costruito dalla specifica **EAN-13**, cifra per cifra: 95 moduli più le zone di
-quiete, alternanza A/B determinata dalla prima cifra, barre di guardia estese.
+La copertina **non porta il codice a barre**: è una scelta editoriale, e la
+composizione resta immagine più tipografia. Chi stampa e chi distribuisce lo
+aggiungono a valle, sul foglio di stampa, dove sanno anche quali zone di quiete
+pretende il loro scanner.
 
-Un codice a barre non si genera con un modello visuale: deve essere letto da uno
-scanner, e questo richiede larghezze esatte.
+L'ISBN resta un dato del volume e viene **validato** al salvataggio: la cifra di
+controllo deve tornare, un ISBN-10 viene convertito in ISBN-13. Un ISBN
+sbagliato in scheda è sbagliato ovunque finisca dopo.
 
-L'ISBN viene **validato**: la cifra di controllo deve tornare. Un ISBN-10 viene
-convertito in ISBN-13. Se non è valido, la generazione fallisce con un messaggio
-esplicito invece di produrre un codice illeggibile — stampato su diecimila copie
-non si corregge.
+Il generatore EAN-13 — 95 moduli, alternanza A/B dalla prima cifra, barre di
+guardia estese — resta in `src/lib/cover/barcode.ts` con i suoi test: serve la
+validazione, e il giorno in cui il codice a barre servisse davvero non andrebbe
+riscritto. Semplicemente, non viene composto sulla copertina.
 
-## 7. Testi programmatici
+## 7. Testi programmatici e logo dello strumento
 
-Titolo, sottotitolo, autore, collana, ISBN e codice a barre sono composti
-**sopra** l'immagine, non generati dentro di essa. Tre motivi: la leggibilità è
-garantita, la posizione è controllata al millimetro, e il testo resta
-verificabile invece di dover essere riletto da un'immagine.
+Titolo, sottotitolo, autore e collana sono composti **sopra** l'immagine, non
+generati dentro di essa. Tre motivi: la leggibilità è garantita, la posizione è
+controllata al millimetro, e il testo resta verificabile invece di dover essere
+riletto da un'immagine.
+
+Lo stesso vale per il **logo dello strumento** oggetto del volume — BigQuery,
+Dataform, quello che sia. Si carica in fase di input, accanto alle fonti, e
+viene composto in basso a destra sul fronte, dentro il margine di sicurezza,
+con `preserveAspectRatio` a `meet`: un marchio non si ritaglia per far quadrare
+un riquadro. Non lo disegna il modello visuale, e non per gusto — un marchio
+ridisegnato somiglia al marchio, e somigliare non basta né al lettore né a chi
+lo possiede.
+
+Il logo entra però fra i **riferimenti** della generazione, in testa alla fila:
+dice al modello da quale gamma cromatica e da quale geometria partire, mentre il
+prompt gli vieta esplicitamente di riprodurre marchi.
 
 I testi passano da una funzione di neutralizzazione XML: un titolo contenente
-`<script>` non può alterare l'SVG.
+`<script>` non può alterare l'SVG. Il maiuscolo dell'occhiello si applica
+**prima** della neutralizzazione, altrimenti `&amp;` diventerebbe `&AMP;`, che
+non è più un'entità valida.
+
+## 7-bis. Il preset di brand
+
+Palette, tipografia e direzione visuale stanno in `src/lib/cover/brand.ts`, in
+un posto solo. Sono ricavate dal sito dell'autore — fondo blu notte quasi nero,
+soggetto tecnico illuminato da dentro con blu elettrico e ciano, geometrie
+pulite — e le usano tre cose che devono somigliarsi: i fondi di riserva
+dell'anteprima, la tipografia composta e il prompt di generazione.
+
+Il *negative prompt* è parte del preset e vieta ciò che romperebbe la
+composizione: testo, marchi, volti, fondi chiari, colori caldi dominanti.
+
+## 7-ter. Anteprime dei corsi
+
+Stessa identità, altro formato: `buildCoursePreviewSvg` produce un 16:9 con
+occhiello, titolo, durata, autore e logo. È **costruita dal codice**, come i
+diagrammi e per la stessa ragione: il titolo di un corso e il numero di lezioni
+sono dati, e un'immagine generata li scriverebbe storti e non correggibili.
+
+Stesso corso, stessa immagine. Si scarica come SVG, con il logo incorporato in
+`data:` URI e non come URL firmato: un collegamento a scadenza, fuori
+dall'applicazione, diventerebbe un riquadro vuoto la mattina dopo.
 
 ## 8. Verifica
 
 `npm test` copre le tre formule del dorso e i loro casi limite, la condizione di
 blocco, la geometria completa (compreso il dorso nullo e quello troppo stretto),
-il posizionamento del codice a barre dentro il margine, la cifra di controllo
-EAN-13 su ISBN noti, il rifiuto degli ISBN non validi, la neutralizzazione XML e
-il determinismo di tutti i generatori.
+la cifra di controllo EAN-13 su ISBN noti, il rifiuto degli ISBN non validi,
+l'assenza del codice a barre dalla composizione, la palette di riserva, il logo
+composto senza ritaglio, la neutralizzazione XML e il determinismo di tutti i
+generatori — anteprime dei corsi comprese.

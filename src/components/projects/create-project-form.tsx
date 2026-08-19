@@ -8,6 +8,7 @@ import { SubmitButton } from '@/components/auth/submit-button';
 import { createProject } from '@/lib/projects/actions';
 import { initialActionState } from '@/lib/auth/action-state';
 import { LIVELLI, REGISTRI, TONI, type VoceEditoriale } from '@/lib/editorial/direzione';
+import { FORME } from '@/lib/editorial/brief';
 
 const CLASSE_SELECT =
   'flex h-10 w-full rounded-lg border border-border-strong bg-surface px-3 text-sm text-foreground';
@@ -118,6 +119,105 @@ export function CreateProjectForm() {
           />
         )}
       </Field>
+
+      <fieldset className="space-y-5 rounded-lg border border-border-subtle p-4">
+        <legend className="px-1 text-sm font-medium text-foreground">Che opera è</legend>
+        <p className="text-xs text-muted-foreground">
+          Vincola l’ampiezza dell’indice e la profondità dei capitoli. Senza queste indicazioni il
+          Curriculum Agent conosce solo il titolo e le fonti: una guida rapida di cento pagine e il
+          primo volume di una collana partono dallo stesso materiale e producono indici opposti.
+        </p>
+
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field
+            id="workShape"
+            label="Forma dell’opera"
+            hint={FORME.map((voce) => `${voce.label}: ${voce.hint}`).join(' · ')}
+            error={state.fieldErrors?.workShape}
+          >
+            {({ id, describedBy }) => (
+              <select
+                id={id}
+                name="workShape"
+                defaultValue="volume_singolo"
+                aria-describedby={describedBy}
+                className={CLASSE_SELECT}
+              >
+                {FORME.map((voce) => (
+                  <option key={voce.value} value={voce.value}>
+                    {voce.label} — {voce.hint}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+
+          <Field
+            id="targetPages"
+            label="Pagine obiettivo"
+            hint="Facoltativo. Vuoto significa nessun vincolo di lunghezza."
+            error={state.fieldErrors?.targetPages}
+          >
+            {({ id, describedBy }) => (
+              <Input
+                id={id}
+                name="targetPages"
+                type="number"
+                min={8}
+                max={2000}
+                placeholder="es. 100"
+                className="w-32"
+                aria-describedby={describedBy}
+              />
+            )}
+          </Field>
+        </div>
+
+        <Field
+          id="audience"
+          label="A chi si rivolge"
+          hint="Es. data engineer che usano già BigQuery"
+          error={state.fieldErrors?.audience}
+        >
+          {({ id, describedBy }) => (
+            <Input id={id} name="audience" aria-describedby={describedBy} />
+          )}
+        </Field>
+
+        <Field
+          id="scope"
+          label="Cosa deve coprire"
+          hint="Es. le regole base di SQL: SELECT, JOIN, aggregazioni, sottoquery"
+          error={state.fieldErrors?.scope}
+        >
+          {({ id, describedBy }) => (
+            <textarea
+              id={id}
+              name="scope"
+              rows={2}
+              aria-describedby={describedBy}
+              className="flex w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
+            />
+          )}
+        </Field>
+
+        <Field
+          id="outOfScope"
+          label="Cosa resta fuori"
+          hint="Dire cosa non si tratta è spesso più efficace che elencare cosa si tratta: è ciò che impedisce all’indice di allargarsi."
+          error={state.fieldErrors?.outOfScope}
+        >
+          {({ id, describedBy }) => (
+            <textarea
+              id={id}
+              name="outOfScope"
+              rows={2}
+              aria-describedby={describedBy}
+              className="flex w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
+            />
+          )}
+        </Field>
+      </fieldset>
 
       <fieldset className="space-y-5 rounded-lg border border-border-subtle p-4">
         <legend className="px-1 text-sm font-medium text-foreground">Direzione editoriale</legend>

@@ -253,11 +253,52 @@ export async function decideReview(
     return { ok: false, message: 'Token di ripresa mancante: il workflow non può essere ripreso.' };
   }
 
-  await approvalHook.resume(request.resume_token, {
-    decision,
-    note: note ?? undefined,
-    decidedBy: user.id,
-  });
+  // Il motore dei workflow è l'unica strada normale, ma non è l'unica possibile.
+  // Se l'esecuzione non è più sospesa — è fallita, è stata annullata, oppure il
+  // processo è ripartito perdendo i gate in attesa — il hook non esiste più e
+  // la ripresa fallisce con «Hook not found».
+  //
+  // Quel guasto non deve però annullare una decisione già presa da una persona:
+  // il workflow è un modo di applicare la decisione, non la decisione stessa.
+  // Si applica direttamente ciò che avrebbe fatto lui, e lo si dichiara.
+  let ripresa = true;
+  try {
+    await approvalHook.resume(request.resume_token, {
+      decision,
+      note: note ?? undefined,
+      decidedBy: user.id,
+    });
+  } catch (error) {
+    const motivo = error instanceof Error ? error.message : String(error);
+    if (!/hook not found/i.test(motivo)) throw error;
+
+    ripresa = false;
+    const applicata = await applicaDecisioneSenzaWorkflow(
+      reviewRequestId,
+      decision,
+      note,
+      user.id,
+      organization.id,
+    );
+    if (!applicata.ok) return applicata;
+
+    // L'esecuzione resterebbe «in attesa di approvazione» per sempre, mentre la
+    // decisione è stata presa: la cronologia direbbe il falso.
+    if (request.workflow_run_id) {
+      await supabase
+        .from('workflow_runs')
+        .update({
+          status: 'completed_with_warnings',
+          finished_at: new Date().toISOString(),
+          error: {
+            message:
+              'Esecuzione non più sospesa al momento della decisione: la decisione è stata ' +
+              'applicata direttamente ai dati. Anteprima del volume da ricomporre.',
+          },
+        })
+        .eq('id', request.workflow_run_id);
+    }
+  }
 
   await recordAudit({
     organizationId: organization.id,
@@ -271,11 +312,76 @@ export async function decideReview(
   revalidatePath(`/projects/${request.project_id}/reviews`);
   revalidatePath(`/projects/${request.project_id}/workflows`);
 
+  const base =
+    decision === 'approved'
+      ? 'Revisione approvata: la nuova versione diventa quella corrente.'
+      : 'Decisione registrata.';
+
   return {
     ok: true,
-    message:
-      decision === 'approved'
-        ? 'Revisione approvata: la nuova versione diventa quella corrente.'
-        : 'Decisione registrata.',
+    message: ripresa
+      ? base
+      : `${base} L’esecuzione non era più sospesa: la decisione è stata applicata direttamente, ` +
+        'e l’anteprima del volume va ricomposta dalla scheda Anteprima.',
   };
+}
+
+/**
+ * Applica la decisione quando il workflow non è più sospeso.
+ *
+ * Riproduce ciò che avrebbe fatto il passaggio `applyDecision`: chiude la
+ * richiesta di revisione, promuove la versione proposta e aggiorna lo stato del
+ * capitolo. Non è una scorciatoia — è il ripristino di una decisione umana già
+ * presa, che non deve andare persa perché il motore ha perso il proprio stato.
+ *
+ * Quello che **non** fa, e per cui l'interfaccia avvisa: ricomporre l'anteprima
+ * del volume. Farlo qui significherebbe generare un PDF dentro l'azione che
+ * risponde al click, con l'attesa che ne consegue; è un'operazione che ha già
+ * il suo pulsante nella scheda Anteprima.
+ */
+async function applicaDecisioneSenzaWorkflow(
+  reviewRequestId: string,
+  decision: 'approved' | 'rejected' | 'changes_requested',
+  note: string | null,
+  decidedBy: string,
+  organizationId: string,
+): Promise<CommandResult> {
+  const supabase = await createClient();
+  const now = new Date().toISOString();
+
+  const { data: request } = await supabase
+    .from('review_requests')
+    .select('id, chapter_id, proposed_version_id, organization_id')
+    .eq('id', reviewRequestId)
+    .maybeSingle<{
+      id: string; chapter_id: string; proposed_version_id: string | null; organization_id: string;
+    }>();
+
+  if (!request || request.organization_id !== organizationId) {
+    return { ok: false, message: 'Richiesta di revisione non trovata.' };
+  }
+
+  const { error } = await supabase
+    .from('review_requests')
+    .update({ status: decision, decided_at: now, decided_by: decidedBy, decision_note: note })
+    .eq('id', reviewRequestId);
+
+  if (error) return { ok: false, message: `Decisione non registrata: ${error.message}` };
+
+  if (decision !== 'approved' || !request.proposed_version_id) {
+    await supabase.from('chapters').update({ status: 'draft' }).eq('id', request.chapter_id);
+    return { ok: true, message: 'Decisione registrata.' };
+  }
+
+  await supabase
+    .from('chapter_versions')
+    .update({ origin: 'approved', is_approved: true, approved_by: decidedBy, approved_at: now })
+    .eq('id', request.proposed_version_id);
+
+  await supabase
+    .from('chapters')
+    .update({ current_version_id: request.proposed_version_id, status: 'approved' })
+    .eq('id', request.chapter_id);
+
+  return { ok: true, message: 'Decisione applicata.' };
 }

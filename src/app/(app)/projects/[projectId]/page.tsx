@@ -9,6 +9,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { getCurrentManifest, getProject, getProjectStructure, listSources } from '@/lib/projects/queries';
 import { etichettaDirezione } from '@/lib/editorial/direzione';
+import { etichettaBrief } from '@/lib/editorial/brief';
 import { DeleteProjectCard } from '@/components/projects/delete-project-card';
 import { getProjectProgress } from '@/lib/projects/progress';
 import { NextStepCard } from '@/components/projects/next-step-card';
@@ -51,6 +52,12 @@ export default async function ProjectOverviewPage({
             tone: project.tone,
             register: project.register,
             styleNotes: project.style_notes,
+          })} · ${etichettaBrief({
+            workShape: project.work_shape,
+            targetPages: project.target_pages,
+            scope: project.scope,
+            outOfScope: project.out_of_scope,
+            audience: project.audience,
           })}`
         }
         actions={

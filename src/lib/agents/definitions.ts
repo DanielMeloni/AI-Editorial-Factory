@@ -6,10 +6,18 @@ import { CATALOG_ENTRIES } from '@/lib/sources/catalog';
 import { findSources, OFFICIAL_INDEX } from '@/lib/sources/match';
 import { researchClaims } from '@/lib/sources/research';
 import {
+  blogArticleInputSchema,
+  blogArticleOutputSchema,
+  blogPlanInputSchema,
+  blogPlanOutputSchema,
   chapterApparatusOutputSchema,
   chapterDraftInputSchema,
   chapterPlanOutputSchema,
   chapterSectionOutputSchema,
+  courseLessonInputSchema,
+  courseLessonOutputSchema,
+  coursePlanInputSchema,
+  coursePlanOutputSchema,
   chapterInputSchema,
   issueSchema,
   revisionOutputSchema,
@@ -20,10 +28,18 @@ import {
   technicalVerifierOutputSchema,
   verifiableClaimSchema,
   visualPlanOutputSchema,
+  type BlogArticleInput,
+  type BlogArticleOutput,
+  type BlogPlanInput,
+  type BlogPlanOutput,
   type ChapterApparatusOutput,
   type ChapterDraftInput,
   type ChapterPlanOutput,
   type ChapterSectionOutput,
+  type CourseLessonInput,
+  type CourseLessonOutput,
+  type CoursePlanInput,
+  type CoursePlanOutput,
   type ChapterInput,
   type Issue,
   type RevisionOutput,
@@ -847,6 +863,228 @@ export const chapterApparatusAgent: AgentDefinition<
       '',
       'Capitolo scritto:',
       input.body.slice(0, 60_000),
+    ]
+      .filter(Boolean)
+      .join('\n'),
+};
+
+// ===========================================================================
+// Blog — piano degli angoli e stesura
+// ===========================================================================
+
+/**
+ * Cosa significa ottimizzare per i motori **e** per i sistemi che rispondono.
+ *
+ * Le due cose non coincidono. Un motore di ricerca indicizza e ordina pagine;
+ * un sistema che risponde estrae un passaggio e lo cita. Il primo premia
+ * struttura e pertinenza, il secondo premia risposte brevi, autosufficienti e
+ * verificabili, messe dove si trovano subito.
+ *
+ * Da qui le due regole che sembrano contraddirsi e non lo sono: la risposta
+ * sintetica va **in apertura**, e il resto dell'articolo la argomenta invece di
+ * ripeterla.
+ */
+const REGOLE_SEO =
+  'Regole di ottimizzazione, da rispettare tutte:\n' +
+  '- Apri con una risposta di due o tre frasi alla domanda del titolo, autosufficiente: ' +
+  'chi legge solo quella deve avere già una risposta corretta.\n' +
+  '- Un solo H1, poi H2 e H3 che ricalcano domande reali. Ogni sezione risponde a una domanda sola.\n' +
+  '- La parola chiave principale compare nel titolo, nella prima sezione e in almeno un H2, ' +
+  'sempre in una frase che si leggerebbe comunque così: nessuna ripetizione forzata.\n' +
+  '- Definisci i termini tecnici alla prima occorrenza, in una frase che regga da sola se estratta.\n' +
+  '- Preferisci elenchi e tabelle dove il contenuto è enumerabile: sono le porzioni che vengono citate.\n' +
+  '- Chiudi con domande frequenti: domande vere, risposte brevi, nessuna che ripeta il corpo.\n' +
+  '- Niente frasi di riempimento, niente «in questo articolo vedremo», niente superlativi.\n' +
+  '- Non inventare dati, versioni, prezzi o limiti: se una cifra non è negli estratti, non si scrive.';
+
+/**
+ * Sceglie gli angoli degli articoli.
+ *
+ * Il piano esiste per una ragione economica prima che editoriale: dieci
+ * articoli sbagliati costano dieci volte uno sbagliato. Si approva la scaletta,
+ * poi si paga la scrittura.
+ *
+ * L'angolo è il campo che conta. Senza, dieci pezzi tratti dallo stesso manuale
+ * finirebbero a dire le stesse cose e a competere fra loro sulle stesse ricerche.
+ */
+export const blogPlanAgent: AgentDefinition<BlogPlanInput, BlogPlanOutput> = {
+  key: 'publishing',
+  name: 'Blog Planner',
+  version: 1,
+  promptVersion: 'v1',
+  inputSchema: blogPlanInputSchema,
+  outputSchema: blogPlanOutputSchema,
+  maxOutputTokens: 4000,
+  system:
+    'Progetti il piano editoriale di un blog tecnico a partire da un manuale già scritto. ' +
+    'Ogni articolo ha un angolo distinto — un problema, un confronto, una procedura, un errore ' +
+    'ricorrente, una decisione da prendere — e una domanda di ricerca diversa dagli altri. ' +
+    'Non proponi riassunti di capitoli. Se il materiale non regge il numero richiesto, ne proponi ' +
+    'meno e spieghi perché in «note»: un piano gonfiato produce articoli che si cannibalizzano. ' +
+    'Rispondi in italiano.',
+
+  buildPrompt: (input) =>
+    [
+      `Opera: ${input.projectTitle}${input.projectSubtitle ? ` — ${input.projectSubtitle}` : ''}`,
+      `Lingua: ${input.language}`,
+      '',
+      input.direzione,
+      '',
+      'Indice dell’opera:',
+      ...input.outline.map((voce) => `- ${voce}`),
+      '',
+      'Estratti disponibili:',
+      input.evidence || '(nessun estratto)',
+      '',
+      `Proponi fino a ${input.count} articoli. Per ciascuno: titolo, angolo, parola chiave ` +
+        'principale, chiavi secondarie e intento di ricerca.',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+};
+
+/** Scrive un articolo del piano. */
+export const blogArticleAgent: AgentDefinition<BlogArticleInput, BlogArticleOutput> = {
+  key: 'publishing',
+  name: 'Blog Writer',
+  version: 1,
+  promptVersion: 'v1',
+  inputSchema: blogArticleInputSchema as unknown as z.ZodType<BlogArticleInput>,
+  outputSchema: blogArticleOutputSchema,
+  maxOutputTokens: 8000,
+  system:
+    'Scrivi articoli tecnici per il blog di un editore, per un lettore professionista. ' +
+    'Ti basi esclusivamente sugli estratti forniti: non aggiungi fatti, cifre o limiti che non ' +
+    'compaiano nelle fonti, e non inventi collegamenti. Dove le fonti non bastano lo annoti in ' +
+    '«gaps» e prosegui. Scrivi dalle 900 alle 1500 parole. Rispondi in italiano.\n\n' +
+    REGOLE_SEO,
+
+  buildPrompt: (input) =>
+    [
+      `Titolo di lavoro: ${input.title}`,
+      `Angolo: ${input.angle}`,
+      `Parola chiave principale: ${input.targetKeyword}`,
+      input.secondaryKeywords.length > 0
+        ? `Chiavi secondarie: ${input.secondaryKeywords.join(', ')}`
+        : '',
+      `Intento di ricerca: ${input.searchIntent}`,
+      `Opera di riferimento: ${input.projectTitle}`,
+      '',
+      input.direzione,
+      '',
+      input.siblings.length > 0
+        ? 'Altri articoli dello stesso piano — non invadere il loro campo, semmai rimandaci:'
+        : '',
+      ...input.siblings.map((titolo) => `- ${titolo}`),
+      '',
+      'Estratti su cui basarti:',
+      input.evidence || '(nessun estratto)',
+      '',
+      'Restituisci l’articolo completo in Markdown, più i metadati richiesti.',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+};
+
+// ===========================================================================
+// Corsi — piano e lezioni
+// ===========================================================================
+
+const FORMATI_CORSO: Record<string, string> = {
+  autoapprendimento:
+    'Formato autoapprendimento: il lettore è solo. Ogni lezione si regge da sé, gli esercizi ' +
+    'hanno una soluzione verificabile senza docente, e ogni passaggio dice come accorgersi di ' +
+    'aver sbagliato.',
+  aula:
+    'Formato aula: c’è un docente. Prevedi note per chi insegna, momenti di discussione, ' +
+    'esercizi da svolgere insieme e i punti in cui conviene fermarsi a controllare la comprensione.',
+  video:
+    'Formato video: la lezione è un copione. Scrivi ciò che si dice e, fra parentesi quadre, ciò ' +
+    'che si mostra a schermo. Frasi brevi, pronunciabili, senza incisi.',
+};
+
+const DURATE_CORSO = (minuti: number): string =>
+  minuti <= 20
+    ? `Lezione da ${minuti} minuti: un concetto solo, un esempio, una verifica. Nulla di più.`
+    : minuti <= 60
+      ? `Lezione da ${minuti} minuti: due o tre concetti collegati, un esercizio guidato, una verifica.`
+      : `Lezione da ${minuti} minuti: trattazione estesa con più esercizi e una parte di ` +
+        'applicazione autonoma. Prevedi una pausa a metà.';
+
+/** Progetta il corso: esiti, prerequisiti e scaletta delle lezioni. */
+export const coursePlanAgent: AgentDefinition<CoursePlanInput, CoursePlanOutput> = {
+  key: 'teaching',
+  name: 'Course Planner',
+  version: 1,
+  promptVersion: 'v1',
+  inputSchema: coursePlanInputSchema,
+  outputSchema: coursePlanOutputSchema,
+  maxOutputTokens: 4000,
+  system:
+    'Progetti corsi tecnici. Parti dagli esiti — cosa saprà fare chi ha finito — e da lì ricavi ' +
+    'le lezioni, non il contrario: una scaletta costruita sugli argomenti disponibili invece che ' +
+    'sugli obiettivi produce un elenco, non un corso. Ogni lezione ha un compito distinto e ' +
+    'poggia su quelle precedenti. Se il materiale non regge il numero di lezioni richiesto ne ' +
+    'proponi meno e lo spieghi in «note». Rispondi in italiano.',
+
+  buildPrompt: (input) =>
+    [
+      `Corso tratto da: ${input.projectTitle}`,
+      `Argomento: ${input.topic}`,
+      `Lezioni richieste: ${input.lessonCount}`,
+      DURATE_CORSO(input.lessonMinutes),
+      FORMATI_CORSO[input.format] ?? '',
+      '',
+      input.direzione,
+      '',
+      'Estratti disponibili:',
+      input.evidence || '(nessun estratto)',
+      '',
+      'Restituisci titolo del corso, sintesi, prerequisiti, esiti di apprendimento e la scaletta ' +
+        'delle lezioni con obiettivi.',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+};
+
+/** Scrive una lezione del corso. */
+export const courseLessonAgent: AgentDefinition<CourseLessonInput, CourseLessonOutput> = {
+  key: 'teaching',
+  name: 'Course Lesson Writer',
+  version: 1,
+  promptVersion: 'v1',
+  inputSchema: courseLessonInputSchema as unknown as z.ZodType<CourseLessonInput>,
+  outputSchema: courseLessonOutputSchema,
+  maxOutputTokens: 8000,
+  system:
+    'Scrivi lezioni di corsi tecnici. Ti basi esclusivamente sugli estratti forniti: non aggiungi ' +
+    'fatti, cifre o limiti che non compaiano nelle fonti, e dove non bastano lo annoti in «gaps». ' +
+    'Ogni lezione ha questa forma: obiettivi, spiegazione, esempio eseguibile, esercizio, verifica ' +
+    'di comprensione, sintesi. La verifica ha risposte corrette indicate in fondo, non accanto ' +
+    'alle domande. Rispondi in italiano.',
+
+  buildPrompt: (input) =>
+    [
+      `Corso su: ${input.topic}`,
+      `Lezione ${input.lessonNumber}: ${input.lessonTitle}`,
+      `Compito della lezione: ${input.lessonIntent}`,
+      input.lessonObjectives.length > 0
+        ? `Obiettivi: ${input.lessonObjectives.join(' · ')}`
+        : '',
+      DURATE_CORSO(input.lessonMinutes),
+      FORMATI_CORSO[input.format] ?? '',
+      '',
+      input.direzione,
+      '',
+      'Scaletta completa del corso — non invadere le altre lezioni:',
+      ...input.outline.map((titolo, indice) =>
+        `${indice + 1 === input.lessonNumber ? '→ ' : '  '}${indice + 1}. ${titolo}`,
+      ),
+      '',
+      'Estratti su cui basarti:',
+      input.evidence || '(nessun estratto)',
+      '',
+      'Restituisci la lezione completa in Markdown, a partire dal titolo di primo livello.',
     ]
       .filter(Boolean)
       .join('\n'),

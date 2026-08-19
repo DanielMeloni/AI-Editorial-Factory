@@ -8,6 +8,7 @@ import { SourceUploader } from '@/components/projects/source-uploader';
 import { ReferenceLibrary } from '@/components/sources/reference-library';
 import { FoundSources } from '@/components/sources/found-sources';
 import { WebDiscovery } from '@/components/sources/web-discovery';
+import { ToolLogo } from '@/components/visual/tool-logo';
 import { CreateStructureButton, NextStepButton, SearchSourcesButton } from '@/components/sources/source-actions';
 import { getProject, listSources } from '@/lib/projects/queries';
 import {
@@ -16,6 +17,7 @@ import {
   listReferences,
   listSuggestions,
 } from '@/lib/sources/queries';
+import { getToolLogo } from '@/lib/visual/queries';
 import { isWebSearchEnabled } from '@/lib/ai/registry';
 import type { SourceStatus } from '@/lib/db/types';
 
@@ -48,12 +50,13 @@ export default async function SourcesPage({
   const project = await getProject(projectId);
   if (!project) notFound();
 
-  const [sources, references, proposals, suggestions, nextStep] = await Promise.all([
+  const [sources, references, proposals, suggestions, nextStep, logo] = await Promise.all([
     listSources(projectId),
     listReferences(projectId),
     listProposedReferences(projectId),
     listSuggestions(projectId),
     getNextStep(projectId),
+    getToolLogo(projectId),
   ]);
 
   const searchEnabled = isWebSearchEnabled();
@@ -77,6 +80,22 @@ export default async function SourcesPage({
         <NextStepButton step={nextStep} />
         <p className="text-xs text-muted-foreground">{nextStep.detail}</p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Logo dello strumento</CardTitle>
+          <CardDescription>
+            Il marchio dello strumento di cui parla il volume — BigQuery, Dataform, quello che
+            sia. Serve due volte: indica al modello colori e geometria da cui partire, e viene
+            composto tale e quale sulla copertina e sulle anteprime dei corsi. Composto, non
+            generato: un marchio ridisegnato da un modello somiglia al marchio, e somigliare non
+            basta.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ToolLogo projectId={projectId} logo={logo} />
+        </CardContent>
+      </Card>
 
       {/* ----------------------------------------------------------------- */}
       {/* Ricerca sul web                                                    */}

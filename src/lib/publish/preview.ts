@@ -2,7 +2,7 @@ import 'server-only';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { composeVolume, etichettaCapitolo } from './volume';
-import { exportVolumePdf } from './pdf';
+import { exportVolumePdf, type VolumeFigure } from './pdf';
 
 /**
  * Anteprima del volume in PDF.
@@ -45,6 +45,10 @@ export async function rebuildVolumePreviewWith(
   }
 
   const volume = await composeVolume(supabase, input.projectId);
+  const figurePerCapitolo = await raccogliFigure(
+    supabase,
+    volume.chapters.map((capitolo) => capitolo.id),
+  );
 
   const bytes = await exportVolumePdf(
     volume.chapters.map((capitolo) => ({
@@ -52,6 +56,8 @@ export async function rebuildVolumePreviewWith(
       title: capitolo.title,
       contentMd: capitolo.contentMd,
       versionNo: capitolo.versionNo,
+      approved: capitolo.approvato,
+      figures: figurePerCapitolo.get(capitolo.id) ?? [],
     })),
     {
       projectTitle: project.title,
@@ -60,6 +66,7 @@ export async function rebuildVolumePreviewWith(
       volume: project.volume,
       generatedAt: new Date().toLocaleString('it-IT'),
       pending: volume.pending.length,
+      drafts: volume.chapters.filter((capitolo) => !capitolo.approvato).length,
     },
   );
 
@@ -112,10 +119,14 @@ export async function rebuildVolumePreviewWith(
     words: volume.totals.words,
     message:
       volume.totals.chapters === 0
-        ? 'Anteprima aggiornata: nessun capitolo convalidato, per ora.'
+        ? 'Anteprima aggiornata: nessun capitolo scritto, per ora.'
         : `Anteprima aggiornata: ${volume.totals.chapters} capitoli, ` +
           `${volume.totals.words.toLocaleString('it-IT')} parole` +
-          `${volume.pending.length > 0 ? `, ${volume.pending.length} ancora da convalidare` : ''}.`,
+          `${
+            volume.chapters.filter((capitolo) => !capitolo.approvato).length > 0
+              ? `, di cui ${volume.chapters.filter((c) => !c.approvato).length} in bozza`
+              : ''
+          }.`,
   };
 }
 
@@ -124,4 +135,62 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
+}
+
+/**
+ * Le figure approvate di ogni capitolo, pronte per il PDF.
+ *
+ * Le immagini vere vengono scaricate e incorporate come dati: un collegamento
+ * firmato scadrebbe, e un PDF che dopo un'ora mostra riquadri vuoti non è un
+ * documento, è una promessa scaduta.
+ *
+ * I diagrammi restano sorgente Mermaid: disegnarli richiederebbe un browser, e
+ * questo generatore esiste proprio per non averne bisogno.
+ */
+async function raccogliFigure(
+  supabase: SupabaseClient,
+  chapterIds: string[],
+): Promise<Map<string, VolumeFigure[]>> {
+  const perCapitolo = new Map<string, VolumeFigure[]>();
+  if (chapterIds.length === 0) return perCapitolo;
+
+  const { data: assets } = await supabase
+    .from('visual_assets')
+    .select('chapter_id, title, caption, alt_text, mermaid_source, storage_bucket, storage_path, version, status')
+    .in('chapter_id', chapterIds)
+    .eq('status', 'approved')
+    .order('version', { ascending: true })
+    .returns<{
+      chapter_id: string | null; title: string | null; caption: string | null;
+      alt_text: string | null; mermaid_source: string | null;
+      storage_bucket: string | null; storage_path: string | null;
+      version: number; status: string;
+    }[]>();
+
+  for (const asset of assets ?? []) {
+    if (!asset.chapter_id) continue;
+
+    let dataUrl: string | null = null;
+    if (asset.storage_path) {
+      const { data: file } = await supabase.storage
+        .from(asset.storage_bucket ?? 'generated-assets')
+        .download(asset.storage_path);
+      if (file) {
+        const base64 = Buffer.from(await file.arrayBuffer()).toString('base64');
+        dataUrl = `data:${file.type || 'image/png'};base64,${base64}`;
+      }
+    }
+
+    const elenco = perCapitolo.get(asset.chapter_id) ?? [];
+    elenco.push({
+      title: asset.title,
+      caption: asset.caption,
+      altText: asset.alt_text,
+      dataUrl,
+      mermaidSource: asset.mermaid_source,
+    });
+    perCapitolo.set(asset.chapter_id, elenco);
+  }
+
+  return perCapitolo;
 }

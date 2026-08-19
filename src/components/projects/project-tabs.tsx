@@ -43,6 +43,8 @@ const TABS: Tab[] = [
   { segment: 'cover-studio', label: 'Copertina', available: true, fase: 'Visuale' },
 
   { segment: 'preview', label: 'Anteprima', available: true, fase: 'Uscita' },
+  { segment: 'blog', label: 'Blog', available: true, fase: 'Uscita' },
+  { segment: 'courses', label: 'Corsi', available: true, fase: 'Uscita' },
   { segment: 'exports', label: 'Pubblicazioni', available: true, fase: 'Uscita' },
 
   { segment: 'settings', label: 'Impostazioni', available: false, fase: '' },

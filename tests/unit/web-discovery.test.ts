@@ -261,8 +261,9 @@ describe('coerenza fra fornitore e modello', () => {
 
     // Cambiare fornitore dimenticando il modello è una svista frequente, e
     // darebbe un errore oscuro dall'altra parte.
+    const { DEFAULT_OPENAI_SEARCH_MODEL } = await import('@/lib/ai/search/openai');
     const esito = searchModelFor('openai', 'claude-sonnet-5');
-    expect(esito.model).toBe('gpt-5.6');
+    expect(esito.model).toBe(DEFAULT_OPENAI_SEARCH_MODEL);
     expect(esito.note).toMatch(/non è un modello openai/i);
   });
 });
@@ -366,12 +367,18 @@ describe('raccolta degli indirizzi da Gemini', () => {
 });
 
 describe('errori dell’API Gemini', () => {
-  it('spiega che la quota gratuita si azzera ogni giorno', async () => {
+  it('riconosce la quota esaurita e riporta il messaggio del fornitore', async () => {
     const { describeGeminiError } = await import('@/lib/ai/search/gemini');
 
-    expect(
-      describeGeminiError(429, JSON.stringify({ error: { message: 'Quota exceeded' } })),
-    ).toMatch(/si azzera ogni giorno/i);
+    // Il testo del suggerimento cambia col piano tariffario del fornitore: il
+    // test verifica che il caso venga riconosciuto e che il motivo originale
+    // arrivi all'utente, non la frase con cui oggi lo si spiega.
+    const messaggio = describeGeminiError(
+      429,
+      JSON.stringify({ error: { message: 'Quota exceeded' } }),
+    );
+    expect(messaggio).toMatch(/quota/i);
+    expect(messaggio).toContain('Quota exceeded');
   });
 
   it('distingue una chiave rifiutata da un modello sbagliato', async () => {
@@ -385,12 +392,14 @@ describe('errori dell’API Gemini', () => {
     ).toMatch(/AI_SEARCH_MODEL/);
   });
 
-  it('suggerisce il modello con quota gratuita se ne serve uno a pagamento', async () => {
-    const { describeGeminiError } = await import('@/lib/ai/search/gemini');
+  it('indica il modello predefinito quando serve la fatturazione', async () => {
+    const { describeGeminiError, DEFAULT_GEMINI_SEARCH_MODEL } = await import(
+      '@/lib/ai/search/gemini'
+    );
 
     expect(
       describeGeminiError(400, JSON.stringify({ error: { message: 'billing required' } })),
-    ).toMatch(/gemini-2\.5-flash/);
+    ).toContain(DEFAULT_GEMINI_SEARCH_MODEL);
   });
 });
 
@@ -398,8 +407,9 @@ describe('coerenza del modello Gemini', () => {
   it('corregge un modello di un altro fornitore', async () => {
     const { searchModelFor } = await import('@/lib/ai/registry');
 
-    expect(searchModelFor('gemini', 'gemini-2.5-flash').note).toBeNull();
-    expect(searchModelFor('gemini', 'gpt-5.6').model).toBe('gemini-2.5-flash');
+    const { DEFAULT_GEMINI_SEARCH_MODEL } = await import('@/lib/ai/search/gemini');
+    expect(searchModelFor('gemini', DEFAULT_GEMINI_SEARCH_MODEL).note).toBeNull();
+    expect(searchModelFor('gemini', 'gpt-5.6').model).toBe(DEFAULT_GEMINI_SEARCH_MODEL);
   });
 });
 

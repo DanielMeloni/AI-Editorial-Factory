@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { BookOpen, Download } from 'lucide-react';
+import { BookOpen, Download, ExternalLink } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -39,6 +39,7 @@ export default async function PreviewPage({
   // Il PDF arriva da una rotta della stessa origine: la Content Security Policy
   // chiude i frame a «self», e servirlo da qui è preferibile ad allargarla.
   const percorso = `/api/projects/${projectId}/preview`;
+  const bozze = volume.chapters.filter((capitolo) => !capitolo.approvato).length;
 
   return (
     <main id="contenuto-principale" className="flex-1 space-y-6 p-4 sm:p-6">
@@ -46,29 +47,51 @@ export default async function PreviewPage({
         title="Anteprima del volume"
         description={
           volume.totals.chapters === 0
-            ? 'Raccoglie i capitoli convalidati. Approva una revisione e il capitolo comparirà qui.'
-            : `${volume.totals.chapters} capitoli convalidati · ${volume.totals.words.toLocaleString('it-IT')} parole` +
-              `${volume.pending.length > 0 ? ` · ${volume.pending.length} ancora da convalidare` : ''}`
+            ? 'Raccoglie tutto ciò che è stato scritto. Avvia l’audit su un capitolo e comparirà qui.'
+            : `${volume.totals.chapters} capitoli · ${volume.totals.words.toLocaleString('it-IT')} parole` +
+              `${bozze > 0 ? ` · ${bozze} in bozza` : ' · tutti approvati'}` +
+              `${volume.pending.length > 0 ? ` · ${volume.pending.length} non ancora scritti` : ''}`
         }
         actions={
           <div className="flex flex-wrap gap-2">
             <RebuildPreviewButton projectId={projectId} />
             {anteprima ? (
-              <a
-                href={`${percorso}?download=1`}
-                className={buttonVariants({ variant: 'secondary', size: 'sm' })}
-              >
-                <Download aria-hidden="true" />
-                Scarica il PDF
-              </a>
+              <>
+                {/* Una via d'uscita se l'incorniciatura non funziona: il PDF
+                    resta raggiungibile senza dipendere dall'iframe. */}
+                <a
+                  href={percorso}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+                >
+                  <ExternalLink aria-hidden="true" />
+                  Apri in una scheda
+                </a>
+                <a
+                  href={`${percorso}?download=1`}
+                  className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+                >
+                  <Download aria-hidden="true" />
+                  Scarica il PDF
+                </a>
+              </>
             ) : null}
           </div>
         }
       />
 
+      {bozze > 0 ? (
+        <Alert tone="warning" title={`${bozze} capitoli sono ancora in bozza`}>
+          Compaiono nell’anteprima, marcati come «bozza non approvata» in testata e nell’indice:
+          vedi il volume intero senza confondere ciò che hai deciso con ciò che non hai ancora
+          deciso.
+        </Alert>
+      ) : null}
+
       {volume.pending.length > 0 ? (
-        <Alert tone="info" title={`${volume.pending.length} capitoli non sono nell’anteprima`}>
-          L’anteprima contiene soltanto ciò che è stato approvato. Mancano:{' '}
+        <Alert tone="info" title={`${volume.pending.length} capitoli non hanno ancora un testo`}>
+          Esistono nella struttura ma nessuno li ha scritti, quindi non c’è nulla da mostrare:{' '}
           {volume.pending
             .slice(0, 6)
             .map((capitolo) => capitolo.title)
@@ -102,7 +125,7 @@ export default async function PreviewPage({
           <CardContent className="p-0">
             {volume.chapters.length === 0 ? (
               <p className="px-5 pb-5 text-sm text-muted-foreground">
-                Nessun capitolo convalidato, per ora.
+                Nessun capitolo scritto, per ora.
               </p>
             ) : (
               <ul className="divide-y divide-border-subtle">
@@ -117,6 +140,7 @@ export default async function PreviewPage({
                     >
                       {capitolo.title}
                     </Link>
+                    {capitolo.approvato ? null : <Badge tone="warning">bozza</Badge>}
                     <Badge tone="neutral">v{capitolo.versionNo}</Badge>
                   </li>
                 ))}

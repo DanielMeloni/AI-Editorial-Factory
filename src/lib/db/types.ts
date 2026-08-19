@@ -42,6 +42,11 @@ export interface ProjectRow {
   tone: string;
   register: string;
   style_notes: string | null;
+  work_shape: 'volume_singolo' | 'collana' | 'guida_rapida';
+  target_pages: number | null;
+  scope: string | null;
+  out_of_scope: string | null;
+  audience: string | null;
   created_at: string;
   updated_at: string;
 }

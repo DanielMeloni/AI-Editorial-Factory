@@ -200,3 +200,68 @@ export async function listCoverReferences(projectId: string): Promise<CoverArtwo
     }),
   );
 }
+
+/**
+ * Il logo dello strumento oggetto del progetto.
+ *
+ * Uno solo: se ne esistesse più d'uno vincerebbe il più recente, ma il
+ * caricamento sostituisce il precedente proprio per non arrivare mai qui a
+ * dover scegliere.
+ */
+export async function getToolLogo(projectId: string): Promise<CoverArtworkRow | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('visual_assets')
+    .select('*')
+    .eq('project_id', projectId)
+    .eq('kind', 'logo')
+    .eq('generator', 'upload')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<AssetRow>();
+
+  if (error) throw new Error(`Lettura del logo fallita: ${error.message}`);
+  if (!data) return null;
+  if (!data.storage_path) return { asset: data, signedUrl: null };
+
+  const { data: firmato } = await supabase.storage
+    .from(data.storage_bucket ?? 'generated-assets')
+    .createSignedUrl(data.storage_path, 3600);
+
+  return { asset: data, signedUrl: firmato?.signedUrl ?? null };
+}
+
+/**
+ * Il logo come `data:` URI, incorporabile.
+ *
+ * Un URL firmato scade dopo un'ora: dentro un'anteprima che si guarda subito
+ * va benissimo, dentro un file che l'autore scarica e ricarica altrove diventa
+ * un riquadro vuoto la mattina dopo. Per ciò che esce dall'applicazione il
+ * logo viaggia dentro l'immagine.
+ */
+export async function getToolLogoDataUrl(projectId: string): Promise<string | null> {
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from('visual_assets')
+    .select('storage_bucket, storage_path')
+    .eq('project_id', projectId)
+    .eq('kind', 'logo')
+    .eq('generator', 'upload')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ storage_bucket: string | null; storage_path: string | null }>();
+
+  if (!data?.storage_path) return null;
+
+  const { data: file } = await supabase.storage
+    .from(data.storage_bucket ?? 'generated-assets')
+    .download(data.storage_path);
+
+  if (!file) return null;
+
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const mime = file.type || 'image/png';
+  return `data:${mime};base64,${bytes.toString('base64')}`;
+}

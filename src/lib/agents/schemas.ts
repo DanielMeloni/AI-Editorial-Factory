@@ -334,7 +334,7 @@ export const chapterDraftInputSchema = z.object({
   partTitle: z.string().nullable(),
   language: z.string().max(20),
   /** Direzione editoriale già tradotta in istruzioni per il modello. */
-  direzione: z.string().max(4000),
+  direzione: z.string().max(9000),
   references: z
     .array(
       z.object({
@@ -433,3 +433,142 @@ export const chapterApparatusOutputSchema = z.object({
 });
 
 export type ChapterApparatusOutput = z.infer<typeof chapterApparatusOutputSchema>;
+
+// ---------------------------------------------------------------------------
+// Derivazioni: articoli per il blog
+// ---------------------------------------------------------------------------
+
+/**
+ * Ingresso comune di piano e stesura.
+ *
+ * Contiene ciò su cui è lecito basarsi — estratti del manuale e direzione
+ * editoriale — e nient'altro: un articolo che parla di cose non presenti
+ * nell'opera prometterebbe al lettore un manuale che non esiste.
+ */
+export const blogPlanInputSchema = z.object({
+  projectTitle: z.string().max(300),
+  projectSubtitle: z.string().max(300).nullable(),
+  direzione: z.string().max(9000),
+  language: z.string().max(20),
+  /** Quanti articoli sono stati chiesti. */
+  count: z.number().int().min(1).max(30),
+  /** Indice dell'opera: titoli di parti e capitoli approvati. */
+  outline: z.array(z.string().max(300)).max(200),
+  evidence: z.string(),
+});
+
+export type BlogPlanInput = z.infer<typeof blogPlanInputSchema>;
+
+export const blogPlanOutputSchema = z.object({
+  articles: z
+    .array(
+      z.object({
+        title: z.string().min(3).max(200),
+        /** Cosa rende questo pezzo diverso dagli altri. */
+        angle: z.string().min(10).max(600),
+        targetKeyword: z.string().max(120),
+        secondaryKeywords: z.array(z.string().max(120)).max(10),
+        /** Informativo, comparativo, procedurale, di soluzione a un problema. */
+        searchIntent: z.string().max(120),
+      }),
+    )
+    .min(1)
+    .max(30),
+  /** Perché sono meno di quanti chiesti, quando lo sono. */
+  note: z.string().max(1000),
+});
+
+export type BlogPlanOutput = z.infer<typeof blogPlanOutputSchema>;
+
+export const blogArticleInputSchema = blogPlanInputSchema.extend({
+  title: z.string().max(200),
+  angle: z.string().max(600),
+  targetKeyword: z.string().max(120),
+  secondaryKeywords: z.array(z.string().max(120)).max(10),
+  searchIntent: z.string().max(120),
+  /** Gli altri titoli del piano: per non ripetere e per collegarli fra loro. */
+  siblings: z.array(z.string().max(200)).max(30),
+});
+
+export type BlogArticleInput = z.infer<typeof blogArticleInputSchema>;
+
+export const blogArticleOutputSchema = z.object({
+  /** Il pezzo intero in Markdown, dal titolo di primo livello. */
+  contentMd: z.string().min(1),
+  slug: z.string().max(120),
+  metaTitle: z.string().max(70),
+  metaDescription: z.string().max(160),
+  /**
+   * La risposta in due righe, in apertura.
+   *
+   * È ciò che un sistema che risponde citando estrae per primo: senza, il pezzo
+   * viene letto ma non ripreso.
+   */
+  answerSummary: z.string().max(400),
+  keyTakeaways: z.array(z.string().max(300)).min(2).max(8),
+  faq: z
+    .array(z.object({ question: z.string().max(300), answer: z.string().max(1200) }))
+    .max(8),
+  /** Termini definiti nel pezzo: aiutano a farsi riconoscere per argomento. */
+  entities: z.array(z.string().max(120)).max(20),
+  internalLinkHints: z.array(z.string().max(200)).max(10),
+  gaps: z.array(z.string().max(300)).max(10),
+});
+
+export type BlogArticleOutput = z.infer<typeof blogArticleOutputSchema>;
+
+// ---------------------------------------------------------------------------
+// Derivazioni: corsi
+// ---------------------------------------------------------------------------
+
+export const coursePlanInputSchema = z.object({
+  projectTitle: z.string().max(300),
+  direzione: z.string().max(9000),
+  language: z.string().max(20),
+  /** Argomento libero, oppure titoli dei capitoli scelti. */
+  topic: z.string().max(2000),
+  level: z.enum(['base', 'intermediate', 'advanced']),
+  format: z.enum(['autoapprendimento', 'aula', 'video']),
+  lessonMinutes: z.number().int().min(10).max(240),
+  lessonCount: z.number().int().min(1).max(40),
+  evidence: z.string(),
+});
+
+export type CoursePlanInput = z.infer<typeof coursePlanInputSchema>;
+
+export const coursePlanOutputSchema = z.object({
+  title: z.string().min(3).max(200),
+  summary: z.string().max(2000),
+  prerequisites: z.array(z.string().max(300)).max(10),
+  outcomes: z.array(z.string().max(300)).min(2).max(12),
+  lessons: z
+    .array(
+      z.object({
+        title: z.string().min(3).max(200),
+        intent: z.string().min(10).max(600),
+        objectives: z.array(z.string().max(300)).min(1).max(6),
+      }),
+    )
+    .min(1)
+    .max(40),
+  note: z.string().max(1000),
+});
+
+export type CoursePlanOutput = z.infer<typeof coursePlanOutputSchema>;
+
+export const courseLessonInputSchema = coursePlanInputSchema.extend({
+  lessonTitle: z.string().max(200),
+  lessonIntent: z.string().max(600),
+  lessonObjectives: z.array(z.string().max(300)).max(6),
+  lessonNumber: z.number().int().positive(),
+  outline: z.array(z.string().max(200)).max(40),
+});
+
+export type CourseLessonInput = z.infer<typeof courseLessonInputSchema>;
+
+export const courseLessonOutputSchema = z.object({
+  contentMd: z.string().min(1),
+  gaps: z.array(z.string().max(300)).max(10),
+});
+
+export type CourseLessonOutput = z.infer<typeof courseLessonOutputSchema>;

@@ -3,6 +3,7 @@ import 'server-only';
 import * as React from 'react';
 import {
   Document,
+  Image,
   Page,
   Text,
   View,
@@ -320,6 +321,27 @@ export interface VolumeChapterInput {
   title: string;
   contentMd: string;
   versionNo: number;
+  /** Falso per i capitoli scritti ma non ancora approvati. */
+  approved: boolean;
+  figures: VolumeFigure[];
+}
+
+/**
+ * Una figura del capitolo.
+ *
+ * `dataUrl` c'è per le immagini vere — illustrazioni generate o caricate — e
+ * manca per i diagrammi, che nel progetto esistono come sorgente Mermaid e non
+ * come pixel. Disegnarli qui richiederebbe un browser, che è esattamente la
+ * dipendenza che questo generatore di PDF evita. Per quelli si stampa il
+ * sorgente, dichiarando che la resa si vede nell'applicazione: meglio un
+ * riquadro onesto di una figura mancante e silenziosa.
+ */
+export interface VolumeFigure {
+  title: string | null;
+  caption: string | null;
+  altText: string | null;
+  dataUrl: string | null;
+  mermaidSource: string | null;
 }
 
 export interface VolumeMeta {
@@ -329,8 +351,10 @@ export interface VolumeMeta {
   volume: string | null;
   /** Passata da fuori: un documento deve poter essere rigenerato identico. */
   generatedAt: string;
-  /** Capitoli esistenti ma non ancora convalidati. */
+  /** Capitoli senza alcun testo, quindi assenti. */
   pending: number;
+  /** Capitoli presenti ma non ancora approvati. */
+  drafts: number;
 }
 
 /**
@@ -343,6 +367,38 @@ export interface VolumeMeta {
  * Il frontespizio dichiara che si tratta di un'anteprima e quanti capitoli
  * mancano ancora. Un PDF che sembra finito e non lo è è peggio di nessun PDF.
  */
+/** Le figure del capitolo, in coda al testo. */
+function renderFigure(figure: VolumeFigure, key: string): React.ReactNode {
+  return (
+    <View key={key} style={{ marginBottom: 12 }} wrap={false}>
+      {figure.dataUrl ? (
+        <Image src={figure.dataUrl} style={{ marginBottom: 4, objectFit: 'contain' }} />
+      ) : (
+        <View style={styles.figura}>
+          <Text style={{ fontSize: 8, color: colori.tenue, marginBottom: 4 }}>
+            DIAGRAMMA — la resa grafica si vede nell’applicazione
+          </Text>
+          {figure.mermaidSource ? (
+            <Text style={styles.codiceRiga}>{figure.mermaidSource.trim()}</Text>
+          ) : null}
+        </View>
+      )}
+
+      {figure.title || figure.caption ? (
+        <Text style={{ fontSize: 8.5, color: colori.tenue }}>
+          {[figure.title, figure.caption].filter(Boolean).join(' — ')}
+        </Text>
+      ) : null}
+
+      {/* Il testo alternativo è parte del contenuto, non un attributo tecnico:
+          chi rilegge deve poterlo controllare come controlla una didascalia. */}
+      {figure.altText ? (
+        <Text style={{ fontSize: 7.5, color: colori.tenue }}>Alt: {figure.altText}</Text>
+      ) : null}
+    </View>
+  );
+}
+
 export async function exportVolumePdf(
   chapters: VolumeChapterInput[],
   meta: VolumeMeta,
@@ -370,10 +426,9 @@ export async function exportVolumePdf(
           </Text>
           <Text style={{ fontSize: 9, color: colori.tenue, fontFamily: 'Helvetica' }}>
             Composta il {meta.generatedAt} · {chapters.length}{' '}
-            {chapters.length === 1 ? 'capitolo convalidato' : 'capitoli convalidati'}
-            {meta.pending > 0
-              ? ` · ${meta.pending} ancora da convalidare, non inclusi`
-              : ' · nessun capitolo in attesa'}
+            {chapters.length === 1 ? 'capitolo' : 'capitoli'}
+            {meta.drafts > 0 ? ` · ${meta.drafts} in bozza, marcati come tali` : ' · tutti approvati'}
+            {meta.pending > 0 ? ` · ${meta.pending} non ancora scritti` : ''}
           </Text>
         </View>
       </Page>
@@ -387,7 +442,10 @@ export async function exportVolumePdf(
               <Text style={{ ...styles.segno, width: 90, fontFamily: 'Helvetica', fontSize: 9 }}>
                 {capitolo.label}
               </Text>
-              <Text style={styles.vocTesto}>{capitolo.title}</Text>
+              <Text style={styles.vocTesto}>
+                {capitolo.title}
+                {capitolo.approved ? '' : '  (bozza non approvata)'}
+              </Text>
             </View>
           ))}
           <View style={styles.piede} fixed>
@@ -406,11 +464,26 @@ export async function exportVolumePdf(
 
         return (
           <Page key={`cap-${indice}`} size="A4" style={styles.page}>
-            {capitolo.label ? <Text style={styles.eyebrow}>{capitolo.label.toUpperCase()}</Text> : null}
+            {capitolo.label ? (
+              <Text style={styles.eyebrow}>
+                {capitolo.label.toUpperCase()}
+                {capitolo.approved ? '' : '  ·  BOZZA NON APPROVATA'}
+              </Text>
+            ) : null}
             <Text style={styles.titolo}>{capitolo.title}</Text>
-            <Text style={styles.metaTesta}>versione {capitolo.versionNo}</Text>
+            <Text style={styles.metaTesta}>
+              versione {capitolo.versionNo}
+              {capitolo.approved ? '' : '  ·  in attesa di approvazione'}
+            </Text>
 
             {albero.children.map((node, i) => renderBlock(node, `c${indice}-b${i}`))}
+
+            {capitolo.figures.length > 0 ? (
+              <View style={{ marginTop: 16 }}>
+                <Text style={styles.h2}>Figure</Text>
+                {capitolo.figures.map((figura, i) => renderFigure(figura, `c${indice}-f${i}`))}
+              </View>
+            ) : null}
 
             <View style={styles.piede} fixed>
               <Text>{meta.projectTitle}</Text>
@@ -423,10 +496,10 @@ export async function exportVolumePdf(
       {/* Un volume senza capitoli convalidati lo dice, invece di essere vuoto */}
       {chapters.length === 0 ? (
         <Page size="A4" style={styles.page}>
-          <Text style={styles.titolo}>Nessun capitolo convalidato</Text>
+          <Text style={styles.titolo}>Nessun capitolo scritto</Text>
           <Text style={styles.paragrafo}>
-            L’anteprima raccoglie i capitoli approvati. Approva una revisione dalla scheda
-            Revisioni e il capitolo comparirà qui.
+            L’anteprima raccoglie tutto ciò che è stato scritto, approvato o no. Avvia l’audit su
+            un capitolo e comparirà qui.
           </Text>
         </Page>
       ) : null}

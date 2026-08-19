@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { generateCoverArtwork, saveCover } from '@/lib/visual/actions';
 import { AssetCard } from '@/components/visual/asset-card';
 import { CoverReferences } from '@/components/visual/cover-references';
+import { ToolLogo } from '@/components/visual/tool-logo';
 import {
   SPINE_FORMULAS,
   SPINE_FORMULA_HINTS,
@@ -22,7 +23,7 @@ import {
   type SpineFormula,
 } from '@/lib/cover/spine';
 import { buildCoverPreviewSvg, computeCoverLayout } from '@/lib/cover/layout';
-import { buildIsbnBarcode } from '@/lib/cover/barcode';
+import { toIsbn13 } from '@/lib/cover/barcode';
 import type { CoverArtworkRow, CoverRow } from '@/lib/visual/queries';
 
 export function CoverStudio({
@@ -30,12 +31,14 @@ export function CoverStudio({
   cover,
   artwork,
   references,
+  logo,
   defaults,
 }: {
   projectId: string;
   cover: CoverRow | null;
   artwork: CoverArtworkRow[];
   references: CoverArtworkRow[];
+  logo: CoverArtworkRow | null;
   defaults: { title: string; subtitle: string | null; author: string };
 }) {
   const router = useRouter();
@@ -50,12 +53,29 @@ export function CoverStudio({
   const [formula, setFormula] = useState<SpineFormula>(cover?.spine_formula ?? 'mm_per_page');
   const [fattore, setFattore] = useState<string>(cover?.spine_factor?.toString() ?? '');
 
-  // Quale proposta si sta guardando, per pannello. Si parte da ciò che è già
-  // agganciato alla copertina: l'anteprima apre su quello che è vero adesso.
+  // Quale proposta si sta guardando, per pannello.
+  //
+  // Si parte da ciò che è agganciato alla copertina; se non c'è aggancio ma
+  // esiste una grafica **approvata**, si apre su quella. Un'anteprima vuota
+  // accanto a un'immagine già approvata è un'anteprima che mente: qualcuno ha
+  // guardato e ha detto sì, e il posto dove si vede il risultato deve mostrarlo.
+  const approvataPerTipo = useMemo(() => {
+    const scelta: Record<string, string | null> = {};
+    for (const kind of ['cover_front', 'cover_spine', 'cover_back']) {
+      // `artwork` arriva ordinato per versione decrescente: la prima approvata
+      // che si incontra è la più recente.
+      const trovata = artwork.find(
+        ({ asset }) => asset.kind === kind && asset.status === 'approved',
+      );
+      scelta[kind] = trovata?.asset.id ?? null;
+    }
+    return scelta;
+  }, [artwork]);
+
   const [selezione, setSelezione] = useState<Record<string, string | null>>({
-    cover_front: cover?.front_asset_id ?? null,
-    cover_spine: cover?.spine_asset_id ?? null,
-    cover_back: cover?.back_asset_id ?? null,
+    cover_front: cover?.front_asset_id ?? approvataPerTipo.cover_front ?? null,
+    cover_spine: cover?.spine_asset_id ?? approvataPerTipo.cover_spine ?? null,
+    cover_back: cover?.back_asset_id ?? approvataPerTipo.cover_back ?? null,
   });
 
   const grafiche = useMemo(() => {
@@ -92,8 +112,12 @@ export function CoverStudio({
   const spineMm = dorso?.ok ? dorso.spineMm : 0;
   const definitivo = canLockSpine(numeroPagine, dorso?.ok ? dorso.spineMm : null);
 
-  // --- Codice a barre -----------------------------------------------------
-  const barcode = useMemo(() => (isbn.trim() ? buildIsbnBarcode(isbn) : null), [isbn]);
+  // --- ISBN ---------------------------------------------------------------
+  // L'ISBN resta un dato della copertina — serve a chi la stampa e a chi la
+  // distribuisce — ma non viene composto sul foglio: nessun codice a barre.
+  // Viene comunque validato, perché un ISBN sbagliato in scheda è sbagliato
+  // ovunque finisca dopo.
+  const isbnValido = useMemo(() => (isbn.trim() ? toIsbn13(isbn) !== null : true), [isbn]);
 
   // --- Anteprima ----------------------------------------------------------
   const anteprima = useMemo(() => {
@@ -118,13 +142,13 @@ export function CoverStudio({
           biography: bio || null,
         },
         {
-          barcodeSvg: barcode?.ok ? barcode.svg : null,
           showGuides: true,
           artwork: grafiche,
+          logoHref: logo?.signedUrl ?? null,
         },
       ),
     };
-  }, [trimW, trimH, spineMm, bleed, safety, titolo, sottotitolo, autore, collana, quarta, bio, barcode, grafiche]);
+  }, [trimW, trimH, spineMm, bleed, safety, titolo, sottotitolo, autore, collana, quarta, bio, grafiche, logo]);
 
   function generaGrafica() {
     startTransition(async () => {
@@ -332,8 +356,8 @@ export function CoverStudio({
               <Field
                 id="isbn"
                 label="ISBN"
-                hint="ISBN-10 o ISBN-13. La cifra di controllo viene verificata."
-                error={isbn.trim() !== '' && barcode && !barcode.ok ? barcode.reason : undefined}
+                hint="ISBN-10 o ISBN-13. La cifra di controllo viene verificata. Non viene stampato in copertina."
+                error={isbnValido ? undefined : 'ISBN non valido: la cifra di controllo non torna.'}
               >
                 {({ id, describedBy }) => (
                   <Input
@@ -341,7 +365,7 @@ export function CoverStudio({
                     value={isbn}
                     onChange={(e) => setIsbn(e.target.value)}
                     aria-describedby={describedBy}
-                    invalid={isbn.trim() !== '' && Boolean(barcode && !barcode.ok)}
+                    invalid={!isbnValido}
                   />
                 )}
               </Field>
@@ -375,6 +399,19 @@ export function CoverStudio({
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Logo dello strumento</CardTitle>
+            <CardDescription>
+              Caricato con le fonti, in fase di input. Viene composto sul fronte, in basso a
+              destra, sopra l’immagine: è l’unico marchio che arriva in copertina così com’è.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ToolLogo projectId={projectId} logo={logo} />
+          </CardContent>
+        </Card>
+
         <div className="flex flex-wrap items-center gap-2">
           <Button disabled={pending} onClick={salva}>
             <Save aria-hidden="true" />
@@ -400,8 +437,8 @@ export function CoverStudio({
             <CardDescription>
               Selezionane una per vederla nell’anteprima: è una prova, non una scelta, e nulla
               viene scritto. Approvandola diventa la grafica della copertina e sostituisce la
-              precedente. Nessuna contiene testo: titolo, autore e codice a barre restano
-              tipografia, composta sopra all’immagine.
+              precedente. Nessuna contiene testo né marchi: titolo, autore e logo restano
+              elementi composti sopra all’immagine.
             </CardDescription>
           </CardHeader>
           <CardContent>

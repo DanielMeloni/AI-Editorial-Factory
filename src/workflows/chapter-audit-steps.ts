@@ -13,6 +13,7 @@ import {
 } from '@/lib/agents/definitions';
 import { analyzeMarkdown } from '@/lib/ingest/markdown';
 import { istruzioniEditoriali } from '@/lib/editorial/direzione';
+import { budgetParole, istruzioniBrief } from '@/lib/editorial/brief';
 import { rebuildVolumePreviewWith } from '@/lib/publish/preview';
 import { buildProjectIndex } from '@/lib/sources/library';
 import { mergeSuggestions, researchClaims } from '@/lib/sources/research';
@@ -218,7 +219,10 @@ export async function draftChapter(
   const [{ data: chapterRow }, { data: project }] = await Promise.all([
     db.from('chapters').select('part_id').eq('id', context.chapterId)
       .maybeSingle<{ part_id: string | null }>(),
-    db.from('projects').select('language, level, tone, register, style_notes')
+    db.from('projects')
+      .select(
+        'language, level, tone, register, style_notes, work_shape, target_pages, scope, out_of_scope, audience',
+      )
       .eq('id', context.projectId)
       .maybeSingle<{
         language: string;
@@ -226,6 +230,11 @@ export async function draftChapter(
         tone: string;
         register: string;
         style_notes: string | null;
+        work_shape: string;
+        target_pages: number | null;
+        scope: string | null;
+        out_of_scope: string | null;
+        audience: string | null;
       }>(),
   ]);
 
@@ -262,6 +271,20 @@ export async function draftChapter(
   // L'obiettivo è ciò che la fase di struttura ha promesso per questo capitolo.
   const obiettivo = chapter.contentMd.match(/##\s*Obiettivo\s*\n+([\s\S]*?)(?:\n#{1,2}\s|$)/i);
 
+  // Quanti capitoli si dividono il budget: quelli di chiusura generati da
+  // codice non consumano quota, perché non li scrive un modello.
+  const { count: capitoliTotali } = await db
+    .from('chapters')
+    .select('id', { count: 'exact', head: true })
+    .eq('project_id', context.projectId)
+    .neq('kind', 'back_matter');
+
+  const budgetOpera = budgetParole(project?.target_pages ?? null);
+  const budgetCapitolo =
+    budgetOpera !== null && (capitoliTotali ?? 0) > 0
+      ? Math.round(budgetOpera / (capitoliTotali ?? 1))
+      : null;
+
   const ingresso = {
     chapterId: chapter.chapterId,
     number: chapter.number,
@@ -271,12 +294,30 @@ export async function draftChapter(
     language: project?.language ?? 'it',
     // Senza questo, tre volumi sullo stesso argomento produrrebbero lo stesso
     // capitolo con tre titoli diversi.
-    direzione: istruzioniEditoriali({
-      level: project?.level ?? 'base',
-      tone: project?.tone ?? 'didattico',
-      register: project?.register ?? 'tecnico_operativo',
-      styleNotes: project?.style_notes ?? null,
-    }),
+    direzione: [
+      istruzioniEditoriali({
+        level: project?.level ?? 'base',
+        tone: project?.tone ?? 'didattico',
+        register: project?.register ?? 'tecnico_operativo',
+        styleNotes: project?.style_notes ?? null,
+      }),
+      istruzioniBrief({
+        workShape: project?.work_shape,
+        targetPages: project?.target_pages,
+        scope: project?.scope,
+        outOfScope: project?.out_of_scope,
+        audience: project?.audience,
+      }),
+      // Il budget del volume diviso per i capitoli che lo compongono. Senza,
+      // «cento pagine» resta un'intenzione dell'editore che non raggiunge mai
+      // chi scrive il singolo capitolo.
+      budgetCapitolo !== null
+        ? `- Questo capitolo deve aggirarsi sulle ${budgetCapitolo.toLocaleString('it-IT')} parole, ` +
+          'apparato di chiusura compreso: è la quota che gli spetta nel totale dell’opera.'
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
     references: (references ?? []).map((riferimento) => ({
       title: riferimento.title,
       publisher: riferimento.publisher ?? null,

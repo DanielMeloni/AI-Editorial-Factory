@@ -5,6 +5,7 @@ import {
   estimateMmPerPageFromGrammage,
 } from '@/lib/cover/spine';
 import { buildIsbnBarcode, ean13CheckDigit, isbn10To13, toIsbn13 } from '@/lib/cover/barcode';
+import { COVER_BACKGROUND } from '@/lib/cover/brand';
 import { buildCoverPreviewSvg, computeCoverLayout } from '@/lib/cover/layout';
 
 describe('calcolo del dorso', () => {
@@ -235,13 +236,6 @@ describe('geometria della copertina', () => {
     expect(layout.frontSafe.x).toBe(layout.front.x + 5);
   });
 
-  it('colloca il codice a barre in basso a destra sulla quarta, dentro il margine', () => {
-    const { barcodeBox, back } = layout;
-    expect(barcodeBox.x).toBeGreaterThanOrEqual(back.x + 5);
-    expect(barcodeBox.x + barcodeBox.width).toBeLessThanOrEqual(back.x + back.width - 5 + 0.01);
-    expect(barcodeBox.y + barcodeBox.height).toBeLessThanOrEqual(back.y + back.height - 5 + 0.01);
-  });
-
   it('segnala quando il dorso è troppo stretto per il testo', () => {
     const stretto = computeCoverLayout({
       trimWidthMm: 148, trimHeightMm: 210, spineMm: 4, bleedMm: 3, safetyMarginMm: 5,
@@ -282,7 +276,9 @@ describe('anteprima della copertina', () => {
   it('scrive titolo, autore e collana come testo, non come immagine', () => {
     expect(svg).toContain('Dataform in Pratica');
     expect(svg).toContain('Daniel Meloni');
-    expect(svg).toContain('Dati &amp; Ingegneria');
+    // La collana è un occhiello: va in maiuscolo, come sul sito. Il maiuscolo
+    // si applica prima della neutralizzazione, o l'entità si romperebbe.
+    expect(svg).toContain('DATI &amp; INGEGNERIA');
   });
 
   it('neutralizza i caratteri XML nei testi forniti', () => {
@@ -303,21 +299,29 @@ describe('anteprima della copertina', () => {
     expect(senzaTesto).not.toContain('rotate(90');
   });
 
-  it('incorpora il codice a barre quando fornito', () => {
-    const barcode = buildIsbnBarcode('9780306406157');
-    expect(barcode.ok).toBe(true);
-    if (!barcode.ok) return;
+  it('non compone alcun codice a barre sulla copertina', () => {
+    // Scelta editoriale, non dimenticanza: la copertina resta immagine e
+    // tipografia. L'ISBN continua a esistere come dato del volume — viene
+    // validato al salvataggio — ma non viene stampato qui.
+    expect(svg).not.toContain('Codice a barre');
+    expect(svg.match(/<svg/g)).toHaveLength(1);
+  });
 
-    const conBarcode = buildCoverPreviewSvg(layout, { title: 'T', author: 'A' }, {
-      barcodeSvg: barcode.svg,
+  it('compone il logo dello strumento senza ritagliarlo', () => {
+    const conLogo = buildCoverPreviewSvg(layout, { title: 'T', author: 'A' }, {
+      logoHref: 'https://esempio.test/logo.png',
     });
-    // Nel codice a barre l'ISBN è reso in tre gruppi di cifre, come da standard.
-    expect(conBarcode).toContain('>780306<');
-    expect(conBarcode).toContain('>406157<');
-    // Un solo elemento svg radice: il codice a barre viene inserito come gruppo.
-    expect(conBarcode.match(/<svg/g)).toHaveLength(1);
-    // L'etichetta accessibile sopravvive all'incorporamento.
-    expect(conBarcode).toContain('<title>Codice a barre ISBN 9780306406157</title>');
+    expect(conLogo).toContain('<image href="https://esempio.test/logo.png"');
+    // `meet`, non `slice`: un marchio non si taglia per far quadrare il riquadro.
+    expect(conLogo).toContain('preserveAspectRatio="xMaxYMax meet"');
+    expect(buildCoverPreviewSvg(layout, { title: 'T', author: 'A' })).not.toContain('logo.png');
+  });
+
+  it('usa la palette della collana come fondo di riserva', () => {
+    const senzaGrafiche = buildCoverPreviewSvg(layout, { title: 'T', author: 'A' });
+    expect(senzaGrafiche).toContain(COVER_BACKGROUND.front);
+    expect(senzaGrafiche).toContain(COVER_BACKGROUND.spine);
+    expect(senzaGrafiche).toContain(COVER_BACKGROUND.back);
   });
 
   it('può nascondere le linee guida di stampa', () => {

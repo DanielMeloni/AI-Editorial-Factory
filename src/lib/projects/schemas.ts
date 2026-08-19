@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { LIVELLI, REGISTRI, TONI } from '@/lib/editorial/direzione';
+import { FORME } from '@/lib/editorial/brief';
 
 export function slugify(value: string): string {
   return value
@@ -31,6 +32,18 @@ export const createProjectSchema = z.object({
     .enum(REGISTRI.map((voce) => voce.value) as [string, ...string[]])
     .default('tecnico_operativo'),
   styleNotes: z.string().trim().max(2000).optional().or(z.literal('')),
+  // Brief: cosa si sta costruendo, non come lo si scrive.
+  workShape: z
+    .enum(FORME.map((voce) => voce.value) as [string, ...string[]])
+    .default('volume_singolo'),
+  // Vuoto significa «nessun vincolo di lunghezza»: il campo resta facoltativo
+  // perché imporre un numero a chi non ce l'ha lo farebbe inventare.
+  targetPages: z
+    .union([z.coerce.number().int().min(8).max(2000), z.literal('')])
+    .optional(),
+  scope: z.string().trim().max(3000).optional().or(z.literal('')),
+  outOfScope: z.string().trim().max(2000).optional().or(z.literal('')),
+  audience: z.string().trim().max(1000).optional().or(z.literal('')),
 });
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;

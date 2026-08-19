@@ -27,6 +27,11 @@ export async function createProject(_prev: ActionState, formData: FormData): Pro
     tone: formData.get('tone') ?? 'didattico',
     register: formData.get('register') ?? 'tecnico_operativo',
     styleNotes: formData.get('styleNotes') ?? '',
+    workShape: formData.get('workShape') ?? 'volume_singolo',
+    targetPages: formData.get('targetPages') ?? '',
+    scope: formData.get('scope') ?? '',
+    outOfScope: formData.get('outOfScope') ?? '',
+    audience: formData.get('audience') ?? '',
   });
 
   if (!parsed.success) {
@@ -70,6 +75,12 @@ export async function createProject(_prev: ActionState, formData: FormData): Pro
       tone: parsed.data.tone,
       register: parsed.data.register,
       style_notes: parsed.data.styleNotes || null,
+      work_shape: parsed.data.workShape,
+      target_pages:
+        typeof parsed.data.targetPages === 'number' ? parsed.data.targetPages : null,
+      scope: parsed.data.scope || null,
+      out_of_scope: parsed.data.outOfScope || null,
+      audience: parsed.data.audience || null,
       created_by: user.id,
     })
     .select('id')

@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase/server';
 import { slugify } from '@/lib/ingest/markdown';
 import { recordAudit } from '@/lib/security/audit';
 import { istruzioniEditoriali } from '@/lib/editorial/direzione';
+import { istruzioniBrief } from '@/lib/editorial/brief';
 import { rebuildBibliography } from '@/lib/bibliography/actions';
 
 const outlineSchema = z.object({
@@ -36,13 +37,15 @@ export async function createManualStructure(projectId: string): Promise<Structur
 
   const { data: project } = await supabase
     .from('projects')
-    .select('id, organization_id, title, subtitle, description, author, volume, language, level, tone, register, style_notes')
+    .select('id, organization_id, title, subtitle, description, author, volume, language, level, tone, register, style_notes, work_shape, target_pages, scope, out_of_scope, audience')
     .eq('id', projectId)
     .maybeSingle<{
       id: string; organization_id: string; title: string; subtitle: string | null;
       description: string | null; author: string; volume: string | null; language: string;
       level: 'base' | 'intermediate' | 'advanced'; tone: string; register: string;
       style_notes: string | null;
+      work_shape: string; target_pages: number | null; scope: string | null;
+      out_of_scope: string | null; audience: string | null;
     }>();
 
   if (!project || project.organization_id !== organization.id) {
@@ -126,6 +129,16 @@ export async function createManualStructure(projectId: string): Promise<Structur
             tone: project.tone,
             register: project.register,
             styleNotes: project.style_notes,
+          }),
+          '',
+          // Il brief viene dopo la direzione perché la vincola: un indice può
+          // essere impeccabile per tono e registro e sbagliato per ampiezza.
+          istruzioniBrief({
+            workShape: project.work_shape,
+            targetPages: project.target_pages,
+            scope: project.scope,
+            outOfScope: project.out_of_scope,
+            audience: project.audience,
           }),
           '',
           'Fonti disponibili:',

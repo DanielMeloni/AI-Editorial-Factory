@@ -9,6 +9,7 @@ import { getImageProvider } from '@/lib/ai/registry';
 import { recordAudit } from '@/lib/security/audit';
 import { checkRateLimit } from '@/lib/security/rate-limit';
 import { buildIsbnBarcode } from '@/lib/cover/barcode';
+import { BRAND_NEGATIVE_PROMPT, brandArtDirection } from '@/lib/cover/brand';
 
 /**
  * Generazione e approvazione degli asset visuali.
@@ -422,7 +423,8 @@ const PARTI = [
     intento:
       'Immagine di copertina per un manuale tecnico. Composizione verticale, ' +
       'soggetto centrale forte, ampio spazio libero nella metà superiore dove verranno ' +
-      'composti titolo e sottotitolo.',
+      'composti titolo e sottotitolo, e fascia inferiore quieta e scura dove verranno ' +
+      'composti autore e logo dello strumento.',
   },
   {
     kind: 'cover_spine' as const,
@@ -495,6 +497,13 @@ export async function generateCoverArtwork(projectId: string): Promise<VisualAct
     };
   }
 
+  // Il dorso dipende dal numero definitivo di pagine, che a manuale in corso
+  // non si conosce. Generarlo adesso significherebbe pagare un'immagine da
+  // rifare: si salta, e lo si dice. Fronte e quarta non aspettano.
+  const dorsoPronto = cover.spine_width_mm !== null && cover.spine_width_mm > 0;
+  const daGenerare = dorsoPronto ? PARTI : PARTI.filter((parte) => parte.kind !== 'cover_spine');
+
+
   const limite = await checkRateLimit(supabase, 'imageGeneration', organization.id);
   if (!limite.allowed) return { ok: false, message: limite.message };
 
@@ -511,8 +520,22 @@ export async function generateCoverArtwork(projectId: string): Promise<VisualAct
     .limit(8)
     .returns<{ storage_bucket: string | null; storage_path: string | null }[]>();
 
+  // Il logo dello strumento apre la fila dei riferimenti: è il dato più
+  // specifico che il progetto abbia sul proprio soggetto, e dice al modello
+  // gamma cromatica e geometria di partenza. Il marchio vero, però, non lo
+  // disegna il modello: viene composto sopra la copertina.
+  const { data: logo } = await supabase
+    .from('visual_assets')
+    .select('storage_bucket, storage_path')
+    .eq('project_id', projectId)
+    .eq('kind', 'logo')
+    .eq('generator', 'upload')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ storage_bucket: string | null; storage_path: string | null }>();
+
   const basi: { bytes: Uint8Array; mimeType: string }[] = [];
-  for (const riferimento of riferimenti ?? []) {
+  for (const riferimento of [...(logo ? [logo] : []), ...(riferimenti ?? [])]) {
     if (!riferimento.storage_path) continue;
     const { data: file } = await supabase.storage
       .from(riferimento.storage_bucket ?? 'generated-assets')
@@ -525,14 +548,15 @@ export async function generateCoverArtwork(projectId: string): Promise<VisualAct
   }
 
   // La direzione visuale è unica per le tre parti: è ciò che le tiene insieme
-  // quando il libro viene chiuso.
+  // quando il libro viene chiuso. Il registro non si reinventa a ogni volume —
+  // arriva dal preset di brand, lo stesso che tinge l'anteprima e i corsi.
   const soggetto = [
     `Manuale tecnico intitolato «${cover.title || project.title}».`,
     cover.subtitle || project.subtitle ? `Sottotitolo: ${cover.subtitle ?? project.subtitle}.` : '',
     project.description ? `Argomento: ${project.description.slice(0, 600)}.` : '',
     cover.series_name ? `Collana: ${cover.series_name}.` : '',
-    'Registro sobrio e professionale, astratto o schematico, adatto a un lettore tecnico. ',
-    'Palette coerente fra le tre parti.',
+    brandArtDirection({ toolName: project.title, hasLogo: logo !== null }),
+    'Palette e materia identiche fra le tre parti: sono un unico foglio piegato.',
   ]
     .filter(Boolean)
     .join(' ');
@@ -541,7 +565,7 @@ export async function generateCoverArtwork(projectId: string): Promise<VisualAct
   const generati: { assetId: string; campo: string }[] = [];
   let costo = 0;
 
-  for (const parte of PARTI) {
+  for (const parte of daGenerare) {
     const larghezzaMm =
       parte.kind === 'cover_spine' ? (cover.spine_width_mm ?? 10) : cover.trim_width_mm;
 
@@ -549,6 +573,7 @@ export async function generateCoverArtwork(projectId: string): Promise<VisualAct
     try {
       immagine = await provider.generate({
         prompt: `${parte.intento}\n\n${soggetto}`,
+        negativePrompt: BRAND_NEGATIVE_PROMPT,
         width: Math.round(larghezzaMm * 12),
         height: Math.round(cover.trim_height_mm * 12),
         references: basi,
@@ -602,6 +627,7 @@ export async function generateCoverArtwork(projectId: string): Promise<VisualAct
       caption: `Grafica del ${parte.etichetta}, v${version}.`,
       alt_text: `Grafica astratta per il ${parte.etichetta} della copertina di «${cover.title || project.title}», senza testo.`,
       prompt: `${parte.intento}\n\n${soggetto}`,
+      negative_prompt: BRAND_NEGATIVE_PROMPT,
       provider: immagine.provider,
       model: immagine.model,
       seed: immagine.seed,
@@ -640,7 +666,14 @@ export async function generateCoverArtwork(projectId: string): Promise<VisualAct
     ok: true,
     assetId: generati[0]?.assetId,
     message: [
-      `Tre grafiche proposte${basi.length > 0 ? ` da ${basi.length} riferiment${basi.length === 1 ? 'o' : 'i'}` : ' senza riferimenti visivi'} (${costo > 0 ? `$${costo.toFixed(4)}` : 'costo non stimato'}): selezionale per vederle in anteprima, approvale per applicarle.`,
+      `${generati.length} grafiche proposte${basi.length > 0 ? ` da ${basi.length} riferiment${basi.length === 1 ? 'o' : 'i'}` : ' senza riferimenti visivi'} (${costo > 0 ? `$${costo.toFixed(4)}` : 'costo non stimato'}): selezionale per vederle in anteprima, approvale per applicarle.`,
+      ...(dorsoPronto
+        ? []
+        : [
+            'Il dorso non è stato generato: dipende dal numero definitivo di pagine, ' +
+              'e a manuale in corso sarebbe un’immagine da rifare. Calcola il dorso e ' +
+              'rigenera quando il volume è chiuso.',
+          ]),
       ...avvisi,
     ].join(' '),
   };
@@ -751,7 +784,13 @@ export async function confirmCoverReference(input: {
     generator: 'upload',
     // Nasce approvato perché non finisce nel libro: è materiale di direzione
     // visuale, e chiederne l'approvazione confonderebbe due cose diverse.
+    //
+    // Chi approva e quando vanno scritti insieme allo stato: il vincolo
+    // `visual_assets_approval_coherent` esiste proprio per impedire un
+    // «approvato» senza nessuno che l'abbia approvato, e aveva ragione.
     status: 'approved',
+    approved_by: user.id,
+    approved_at: new Date().toISOString(),
     version: 1,
     title: input.filename.slice(0, 200) || 'Riferimento visivo',
     caption: 'Riferimento per la generazione della copertina.',
@@ -804,4 +843,171 @@ export async function deleteCoverReference(assetId: string): Promise<VisualActio
 
   revalidatePath(`/projects/${asset.project_id}/cover-studio`);
   return { ok: true, message: 'Riferimento rimosso.' };
+}
+
+// ---------------------------------------------------------------------------
+// Logo dello strumento oggetto del progetto
+// ---------------------------------------------------------------------------
+
+/**
+ * Prepara il caricamento del logo dello strumento.
+ *
+ * Vive accanto alle fonti, in fase di input, perché è un dato del progetto e
+ * non della copertina: dice di che cosa parla il volume prima ancora che
+ * esistano un formato di stampa e un dorso.
+ */
+export async function requestToolLogoTicket(input: {
+  projectId: string;
+  filename: string;
+  byteSize: number;
+  mimeType: string;
+}): Promise<CoverReferenceTicket | { ok: false; message: string }> {
+  await requireUser();
+  const organization = await requireOrganization();
+
+  if (!z.string().uuid().safeParse(input.projectId).success) {
+    return { ok: false, message: 'Progetto non valido.' };
+  }
+  if (!MIME_RIFERIMENTO.includes(input.mimeType as (typeof MIME_RIFERIMENTO)[number])) {
+    return { ok: false, message: 'Formati ammessi: PNG, JPEG, WebP. Meglio un PNG con sfondo trasparente.' };
+  }
+  if (input.byteSize <= 0 || input.byteSize > MAX_BYTE_RIFERIMENTO) {
+    return { ok: false, message: 'Il logo supera i 10 MB.' };
+  }
+
+  const supabase = await createClient();
+
+  const { data: project } = await supabase
+    .from('projects')
+    .select('id, organization_id')
+    .eq('id', input.projectId)
+    .maybeSingle<{ id: string; organization_id: string }>();
+
+  if (!project || project.organization_id !== organization.id) {
+    return { ok: false, message: 'Progetto non trovato.' };
+  }
+
+  const assetId = crypto.randomUUID();
+  const estensione =
+    input.mimeType === 'image/jpeg' ? 'jpg' : input.mimeType === 'image/webp' ? 'webp' : 'png';
+  const path = `${organization.id}/${input.projectId}/tool-logo/${assetId}.${estensione}`;
+
+  const { data: firmato, error } = await supabase.storage
+    .from('generated-assets')
+    .createSignedUploadUrl(path);
+
+  if (error || !firmato) {
+    return { ok: false, message: 'Impossibile preparare il caricamento. Riprova.' };
+  }
+
+  return { ok: true, assetId, bucket: 'generated-assets', path, token: firmato.token };
+}
+
+/**
+ * Registra il logo a caricamento avvenuto e sostituisce il precedente.
+ *
+ * Il logo è uno solo per progetto: conservarne una pila costringerebbe ogni
+ * lettore di questa riga — copertina, anteprima dei corsi, generazione — a
+ * scegliere quale sia quello buono, e a scegliere in modo diverso.
+ */
+export async function confirmToolLogo(input: {
+  projectId: string;
+  assetId: string;
+  path: string;
+  filename: string;
+}): Promise<VisualActionResult> {
+  const user = await requireUser();
+  const organization = await requireOrganization();
+  const supabase = await createClient();
+
+  if (!input.path.startsWith(`${organization.id}/${input.projectId}/tool-logo/`)) {
+    return { ok: false, message: 'Percorso non valido.' };
+  }
+
+  const { error } = await supabase.from('visual_assets').insert({
+    id: input.assetId,
+    project_id: input.projectId,
+    organization_id: organization.id,
+    chapter_id: null,
+    kind: 'logo',
+    generator: 'upload',
+    // Come i riferimenti: non entra nel corpo del libro, quindi non ha un
+    // percorso di approvazione. Chi lo carica lo sta già scegliendo.
+    status: 'approved',
+    approved_by: user.id,
+    approved_at: new Date().toISOString(),
+    version: 1,
+    title: input.filename.slice(0, 200) || 'Logo dello strumento',
+    caption: 'Logo dello strumento oggetto del progetto.',
+    alt_text: 'Logo dello strumento oggetto del progetto, caricato dall’autore.',
+    storage_bucket: 'generated-assets',
+    storage_path: input.path,
+    cost_usd: 0,
+    created_by: user.id,
+  });
+
+  if (error) {
+    await supabase.storage.from('generated-assets').remove([input.path]);
+    return { ok: false, message: `Registrazione del logo non riuscita: ${error.message}` };
+  }
+
+  // I precedenti se ne vanno solo ora: se l'inserimento fosse fallito, il
+  // progetto sarebbe rimasto senza logo per colpa di una sostituzione.
+  const { data: vecchi } = await supabase
+    .from('visual_assets')
+    .select('id, storage_bucket, storage_path')
+    .eq('project_id', input.projectId)
+    .eq('kind', 'logo')
+    .eq('generator', 'upload')
+    .neq('id', input.assetId)
+    .returns<{ id: string; storage_bucket: string | null; storage_path: string | null }[]>();
+
+  for (const vecchio of vecchi ?? []) {
+    if (vecchio.storage_path) {
+      await supabase.storage
+        .from(vecchio.storage_bucket ?? 'generated-assets')
+        .remove([vecchio.storage_path]);
+    }
+    await supabase.from('visual_assets').delete().eq('id', vecchio.id);
+  }
+
+  revalidatePath(`/projects/${input.projectId}/sources`);
+  revalidatePath(`/projects/${input.projectId}/cover-studio`);
+  revalidatePath(`/projects/${input.projectId}/courses`);
+  return { ok: true, assetId: input.assetId, message: 'Logo caricato.' };
+}
+
+/** Rimuove il logo dello strumento, file compreso. */
+export async function deleteToolLogo(assetId: string): Promise<VisualActionResult> {
+  await requireUser();
+  const organization = await requireOrganization();
+  const supabase = await createClient();
+
+  const { data: asset } = await supabase
+    .from('visual_assets')
+    .select('id, project_id, organization_id, kind, generator, storage_bucket, storage_path')
+    .eq('id', assetId)
+    .maybeSingle<{
+      id: string; project_id: string; organization_id: string; kind: string;
+      generator: string; storage_bucket: string | null; storage_path: string | null;
+    }>();
+
+  if (!asset || asset.organization_id !== organization.id) {
+    return { ok: false, message: 'Logo non trovato.' };
+  }
+  if (asset.kind !== 'logo' || asset.generator !== 'upload') {
+    return { ok: false, message: 'Questo asset non è il logo dello strumento.' };
+  }
+
+  if (asset.storage_path) {
+    await supabase.storage
+      .from(asset.storage_bucket ?? 'generated-assets')
+      .remove([asset.storage_path]);
+  }
+  await supabase.from('visual_assets').delete().eq('id', assetId);
+
+  revalidatePath(`/projects/${asset.project_id}/sources`);
+  revalidatePath(`/projects/${asset.project_id}/cover-studio`);
+  revalidatePath(`/projects/${asset.project_id}/courses`);
+  return { ok: true, message: 'Logo rimosso.' };
 }
