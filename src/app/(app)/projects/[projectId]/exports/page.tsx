@@ -16,7 +16,13 @@ const STATO = {
   failed: { label: 'fallito', tone: 'danger' },
 } as const;
 
-const FORMATO_LABEL = { markdown: 'Markdown', html: 'HTML', pdf: 'PDF', json: 'JSON' } as const;
+const FORMATO_LABEL = {
+  markdown: 'Markdown',
+  html: 'HTML',
+  pdf: 'PDF',
+  json: 'JSON',
+  epub: 'EPUB',
+} as const;
 
 const TIPO_OUTPUT = {
   manual: { label: 'Manuale', icon: BookOpen },
@@ -31,11 +37,7 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 }
 
-export default async function ExportsPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function ExportsPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const project = await getProject(projectId);
   if (!project) notFound();
@@ -50,7 +52,7 @@ export default async function ExportsPage({
     <main id="contenuto-principale" className="flex-1 space-y-6 p-4 sm:p-6">
       <PageHeader
         title="Pubblicazioni"
-        description="Markdown, HTML, PDF, lezione e articolo derivati dalla versione approvata. I file restano in archivio privato."
+        description="PDF, EPUB e HTML derivati dalla versione approvata. I file restano in archivio privato."
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
@@ -73,7 +75,7 @@ export default async function ExportsPage({
                   className="m-5 py-8"
                 />
               ) : (
-                <ul className="divide-y divide-border-subtle">
+                <ul className="divide-border-subtle divide-y">
                   {exports.map((esportazione) => {
                     const stato = STATO[esportazione.status];
                     const capitolo = esportazione.chapters;
@@ -83,12 +85,12 @@ export default async function ExportsPage({
                         className="flex flex-wrap items-center gap-x-3 gap-y-2 px-5 py-3"
                       >
                         <Badge tone="neutral">{FORMATO_LABEL[esportazione.format]}</Badge>
-                        <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                        <span className="text-foreground min-w-0 flex-1 truncate text-sm">
                           {capitolo
                             ? `${capitolo.label ? `${capitolo.label} — ` : ''}${capitolo.title}`
                             : 'Capitolo rimosso'}
                         </span>
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-muted-foreground text-xs">
                           {formatBytes(esportazione.byte_size)}
                         </span>
                         <Badge tone={stato.tone}>{stato.label}</Badge>
@@ -96,7 +98,7 @@ export default async function ExportsPage({
                           <DownloadButton exportId={esportazione.id} label="Scarica" />
                         ) : null}
                         {esportazione.error ? (
-                          <p className="w-full text-xs text-danger">{esportazione.error}</p>
+                          <p className="text-danger w-full text-xs">{esportazione.error}</p>
                         ) : null}
                       </li>
                     );
@@ -122,32 +124,34 @@ export default async function ExportsPage({
                   className="m-5 py-8"
                 />
               ) : (
-                <ul className="divide-y divide-border-subtle">
+                <ul className="divide-border-subtle divide-y">
                   {outputs.map((output) => {
                     const tipo = TIPO_OUTPUT[output.kind];
                     const pendenze = Array.isArray(
                       (output.content as { pendingAuthoring?: unknown }).pendingAuthoring,
                     )
-                      ? ((output.content as { pendingAuthoring: string[] }).pendingAuthoring)
+                      ? (output.content as { pendingAuthoring: string[] }).pendingAuthoring
                       : [];
 
                     return (
                       <li key={output.id} className="space-y-1.5 px-5 py-3">
                         <div className="flex flex-wrap items-center gap-2">
-                          <tipo.icon className="size-4 text-muted-foreground" aria-hidden="true" />
-                          <span className="text-sm font-medium text-foreground">{output.title}</span>
+                          <tipo.icon className="text-muted-foreground size-4" aria-hidden="true" />
+                          <span className="text-foreground text-sm font-medium">
+                            {output.title}
+                          </span>
                           <Badge tone="neutral">{tipo.label}</Badge>
                           {output.slug ? (
-                            <code className="text-xs text-muted-foreground">/{output.slug}</code>
+                            <code className="text-muted-foreground text-xs">/{output.slug}</code>
                           ) : null}
                         </div>
 
                         {pendenze.length > 0 ? (
                           <details className="text-xs">
-                            <summary className="cursor-pointer text-warning">
+                            <summary className="text-warning cursor-pointer">
                               {pendenze.length} punt{pendenze.length === 1 ? 'o' : 'i'} da scrivere
                             </summary>
-                            <ul className="mt-1 list-inside list-disc space-y-0.5 text-muted-foreground">
+                            <ul className="text-muted-foreground mt-1 list-inside list-disc space-y-0.5">
                               {pendenze.map((voce, index) => (
                                 <li key={index}>{voce}</li>
                               ))}

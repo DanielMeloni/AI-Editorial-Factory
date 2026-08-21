@@ -7,9 +7,10 @@ import { requireUser } from '@/lib/auth/guards';
 import { requireOrganization } from '@/lib/auth/organization';
 import { recordAudit } from '@/lib/security/audit';
 import { checkRateLimit } from '@/lib/security/rate-limit';
-import { exportMarkdown, type Citation, type ExportMeta } from './markdown';
+import type { Citation, ExportMeta } from './markdown';
 import { exportHtml } from './html';
 import { exportPdf } from './pdf';
+import { exportEpub } from './epub';
 import { deriveArticle, deriveLesson } from './derivations';
 import { rebuildVolumePreviewWith, type EsitoAnteprima } from './preview';
 import { scegliVersioneCompleta, type VersioneComponibile } from './volume';
@@ -31,7 +32,7 @@ export interface PublishResult {
   exportId?: string;
 }
 
-const FORMATI = ['markdown', 'html', 'pdf', 'json'] as const;
+const FORMATI = ['pdf', 'epub', 'html'] as const;
 export type ExportFormat = (typeof FORMATI)[number];
 
 const requestSchema = z.object({
@@ -41,17 +42,15 @@ const requestSchema = z.object({
 });
 
 const CONTENT_TYPE: Record<ExportFormat, string> = {
-  markdown: 'text/markdown; charset=utf-8',
-  html: 'text/html; charset=utf-8',
   pdf: 'application/pdf',
-  json: 'application/json; charset=utf-8',
+  epub: 'application/epub+zip',
+  html: 'text/html; charset=utf-8',
 };
 
 const ESTENSIONE: Record<ExportFormat, string> = {
-  markdown: 'md',
-  html: 'html',
   pdf: 'pdf',
-  json: 'json',
+  epub: 'epub',
+  html: 'html',
 };
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -171,6 +170,7 @@ export async function publishChapter(input: {
     versionNo: version.version_no,
     exportedAt: new Date().toISOString(),
   };
+  const contenutoCompleto = sanitizzaContenutoExport(version.content_md);
 
   // ---------------------------------------------------------------------
   // Derivazioni
@@ -178,11 +178,11 @@ export async function publishChapter(input: {
   const outputIds: string[] = [];
 
   if (parsed.data.includeDerivations) {
-    const lezione = deriveLesson(version.content_md, {
+    const lezione = deriveLesson(contenutoCompleto, {
       title: chapter.title,
       chapterLabel: meta.chapterLabel,
     });
-    const articolo = deriveArticle(version.content_md, {
+    const articolo = deriveArticle(contenutoCompleto, {
       title: chapter.title,
       author: meta.author,
       projectTitle: meta.projectTitle,
@@ -228,7 +228,7 @@ export async function publishChapter(input: {
   let ultimoExportId: string | undefined;
 
   for (const formato of parsed.data.formats) {
-    const { data: exportRow } = await supabase
+    const { data: exportRow, error: exportInsertError } = await supabase
       .from('exports')
       .insert({
         project_id: chapter.project_id,
@@ -244,7 +244,7 @@ export async function publishChapter(input: {
       .single<{ id: string }>();
 
     if (!exportRow) {
-      errori.push(`${formato}: registrazione non riuscita`);
+      errori.push(`${formato}: ${exportInsertError?.message ?? 'registrazione non riuscita'}`);
       continue;
     }
 
@@ -252,39 +252,16 @@ export async function publishChapter(input: {
       let bytes: Uint8Array;
 
       switch (formato) {
-        case 'markdown':
-          bytes = new TextEncoder().encode(
-            exportMarkdown(version.content_md, meta, { citations }).content,
-          );
-          break;
         case 'html': {
-          const esito = await exportHtml(version.content_md, meta, { citations });
+          const esito = await exportHtml(contenutoCompleto, meta, { citations });
           bytes = new TextEncoder().encode(esito.html);
           break;
         }
         case 'pdf':
-          bytes = await exportPdf(version.content_md, meta, { citations });
+          bytes = await exportPdf(contenutoCompleto, meta, { citations });
           break;
-        case 'json':
-          bytes = new TextEncoder().encode(
-            JSON.stringify(
-              {
-                meta,
-                lesson: deriveLesson(version.content_md, {
-                  title: chapter.title,
-                  chapterLabel: meta.chapterLabel,
-                }),
-                article: deriveArticle(version.content_md, {
-                  title: chapter.title,
-                  author: meta.author,
-                  projectTitle: meta.projectTitle,
-                }),
-                citations,
-              },
-              null,
-              2,
-            ),
-          );
+        case 'epub':
+          bytes = await exportEpub(contenutoCompleto, meta, { citations });
           break;
       }
 
@@ -345,6 +322,10 @@ export async function publishChapter(input: {
         ? `${riusciti} formati esportati dalla versione ${version.version_no}.`
         : `${riusciti} formati esportati. Non riusciti: ${errori.join(', ')}.`,
   };
+}
+
+function sanitizzaContenutoExport(markdown: string): string {
+  return markdown.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
 }
 
 /** URL di download a breve scadenza. I bucket restano privati. */

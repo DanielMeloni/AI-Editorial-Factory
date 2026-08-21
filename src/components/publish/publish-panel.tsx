@@ -11,10 +11,9 @@ import { publishChapter, type ExportFormat } from '@/lib/publish/actions';
 import type { ChapterOption } from '@/lib/publish/queries';
 
 const FORMATI: { key: ExportFormat; label: string; hint: string }[] = [
-  { key: 'markdown', label: 'Markdown', hint: 'Formato editoriale principale, con front matter e riferimenti.' },
-  { key: 'html', label: 'HTML', hint: 'Documento semantico e sanificato, pronto per il web.' },
   { key: 'pdf', label: 'PDF', hint: 'Impaginato per la lettura, con numerazione delle pagine.' },
-  { key: 'json', label: 'JSON', hint: 'Lezione e articolo in forma strutturata.' },
+  { key: 'epub', label: 'EPUB', hint: 'Ebook EPUB 3 compatibile con i principali lettori.' },
+  { key: 'html', label: 'HTML', hint: 'Documento semantico e sanificato, pronto per il web.' },
 ];
 
 export function PublishPanel({ chapters }: { chapters: ChapterOption[] }) {
@@ -24,7 +23,7 @@ export function PublishPanel({ chapters }: { chapters: ChapterOption[] }) {
   const esportabili = chapters.filter((c) => c.hasApprovedVersion);
   const [chapterId, setChapterId] = useState(esportabili[0]?.id ?? '');
   const [formati, setFormati] = useState<Set<ExportFormat>>(
-    () => new Set<ExportFormat>(['markdown', 'html', 'pdf']),
+    () => new Set<ExportFormat>(['pdf', 'epub', 'html']),
   );
   const [derivazioni, setDerivazioni] = useState(true);
 
@@ -63,7 +62,7 @@ export function PublishPanel({ chapters }: { chapters: ChapterOption[] }) {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm">
-          <FileDown className="size-4 text-muted-foreground" aria-hidden="true" />
+          <FileDown className="text-muted-foreground size-4" aria-hidden="true" />
           Esporta un capitolo
         </CardTitle>
         <CardDescription>
@@ -89,7 +88,7 @@ export function PublishPanel({ chapters }: { chapters: ChapterOption[] }) {
                 id="capitolo"
                 value={chapterId}
                 onChange={(event) => setChapterId(event.target.value)}
-                className="h-10 w-full rounded-lg border border-border-strong bg-surface px-3 text-sm"
+                className="border-border-strong bg-surface h-10 w-full rounded-lg border px-3 text-sm"
               >
                 {esportabili.map((capitolo) => (
                   <option key={capitolo.id} value={capitolo.id}>
@@ -105,7 +104,7 @@ export function PublishPanel({ chapters }: { chapters: ChapterOption[] }) {
                 {FORMATI.map((formato) => (
                   <label
                     key={formato.key}
-                    className="flex items-start gap-2 rounded-lg border border-border-subtle p-2.5 text-sm"
+                    className="border-border-subtle flex items-start gap-2 rounded-lg border p-2.5 text-sm"
                   >
                     <input
                       type="checkbox"
@@ -115,7 +114,7 @@ export function PublishPanel({ chapters }: { chapters: ChapterOption[] }) {
                     />
                     <span>
                       <span className="font-medium">{formato.label}</span>
-                      <span className="block text-xs text-muted-foreground">{formato.hint}</span>
+                      <span className="text-muted-foreground block text-xs">{formato.hint}</span>
                     </span>
                   </label>
                 ))}
@@ -131,7 +130,7 @@ export function PublishPanel({ chapters }: { chapters: ChapterOption[] }) {
               />
               <span>
                 <span className="font-medium">Deriva lezione e articolo</span>
-                <span className="block text-xs text-muted-foreground">
+                <span className="text-muted-foreground block text-xs">
                   Estrae ciò che il capitolo contiene ed elenca ciò che resta da scrivere, senza
                   inventarlo.
                 </span>
@@ -146,7 +145,7 @@ export function PublishPanel({ chapters }: { chapters: ChapterOption[] }) {
         )}
 
         {bloccati.length > 0 ? (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-muted-foreground text-xs">
             {bloccati.length} capitol{bloccati.length === 1 ? 'o' : 'i'} non esportabil
             {bloccati.length === 1 ? 'e' : 'i'}: revisione ancora aperta.
           </p>

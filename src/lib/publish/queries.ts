@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 export interface ExportRow {
   id: string;
   chapter_id: string | null;
-  format: 'markdown' | 'html' | 'pdf' | 'json';
+  format: 'markdown' | 'html' | 'pdf' | 'json' | 'epub';
   status: 'queued' | 'running' | 'ready' | 'failed';
   storage_path: string | null;
   byte_size: number | null;
@@ -73,10 +73,16 @@ export async function listExportableChapters(projectId: string): Promise<Chapter
     .select('id, title, number, label, status, current_version_id')
     .eq('project_id', projectId)
     .order('order_index', { ascending: true })
-    .returns<{
-      id: string; title: string; number: number | null; label: string | null;
-      status: string; current_version_id: string | null;
-    }[]>();
+    .returns<
+      {
+        id: string;
+        title: string;
+        number: number | null;
+        label: string | null;
+        status: string;
+        current_version_id: string | null;
+      }[]
+    >();
 
   if (!chapters || chapters.length === 0) return [];
 
@@ -112,9 +118,7 @@ export interface VolumePreviewInfo {
   completedAt: string | null;
 }
 
-export async function getVolumePreviewInfo(
-  projectId: string,
-): Promise<VolumePreviewInfo | null> {
+export async function getVolumePreviewInfo(projectId: string): Promise<VolumePreviewInfo | null> {
   const supabase = await createClient();
 
   const { data } = await supabase
