@@ -12,6 +12,7 @@ import { exportHtml } from './html';
 import { exportPdf } from './pdf';
 import { deriveArticle, deriveLesson } from './derivations';
 import { rebuildVolumePreviewWith, type EsitoAnteprima } from './preview';
+import { scegliVersioneCompleta, type VersioneComponibile } from './volume';
 
 /**
  * Produzione degli output editoriali.
@@ -85,9 +86,14 @@ export async function publishChapter(input: {
     .select('id, project_id, organization_id, number, label, title, status, current_version_id')
     .eq('id', parsed.data.chapterId)
     .maybeSingle<{
-      id: string; project_id: string; organization_id: string;
-      number: number | null; label: string | null; title: string;
-      status: string; current_version_id: string | null;
+      id: string;
+      project_id: string;
+      organization_id: string;
+      number: number | null;
+      label: string | null;
+      title: string;
+      status: string;
+      current_version_id: string | null;
     }>();
 
   if (!chapter || chapter.organization_id !== organization.id) {
@@ -97,19 +103,29 @@ export async function publishChapter(input: {
     return { ok: false, message: 'Il capitolo non ha una versione corrente da esportare.' };
   }
 
-  const { data: version } = await supabase
+  const { data: versions, error: versionsError } = await supabase
     .from('chapter_versions')
-    .select('id, version_no, content_md, origin, is_approved')
-    .eq('id', chapter.current_version_id)
-    .maybeSingle<{
-      id: string; version_no: number; content_md: string; origin: string; is_approved: boolean;
-    }>();
+    .select(
+      'id, chapter_id, version_no, content_md, origin, is_approved, word_count, parent_version_id',
+    )
+    .eq('chapter_id', chapter.id)
+    .returns<(VersioneComponibile & { origin: string; is_approved: boolean })[]>();
 
-  if (!version) return { ok: false, message: 'Versione corrente non reperibile.' };
+  if (versionsError) {
+    return { ok: false, message: `Lettura delle versioni fallita: ${versionsError.message}` };
+  }
+  const version = scegliVersioneCompleta(chapter.id, chapter.current_version_id, versions ?? []);
+  if (!version) return { ok: false, message: 'Nessuna versione completa del capitolo reperibile.' };
 
   // Il gate umano della Fase 4 sarebbe inutile se si potesse esportare una
   // proposta non approvata.
-  if (version.origin === 'ai_proposal' && !version.is_approved) {
+  const versioneConStato = (versions ?? []).find((candidate) => candidate.id === version.id);
+  if (
+    chapter.status !== 'approved' &&
+    chapter.status !== 'published' &&
+    versioneConStato?.origin === 'ai_proposal' &&
+    !versioneConStato.is_approved
+  ) {
     return {
       ok: false,
       message:
@@ -130,7 +146,9 @@ export async function publishChapter(input: {
     .from('citations')
     .select('url, title, publisher, is_official')
     .eq('chapter_id', chapter.id)
-    .returns<{ url: string; title: string | null; publisher: string | null; is_official: boolean }[]>();
+    .returns<
+      { url: string; title: string | null; publisher: string | null; is_official: boolean }[]
+    >();
 
   const citations: Citation[] = (citazioni ?? []).map((c) => ({
     url: c.url,
@@ -199,7 +217,12 @@ export async function publishChapter(input: {
   // File
   // ---------------------------------------------------------------------
   const base = `${organization.id}/${chapter.project_id}/exports/${chapter.id}/v${version.version_no}`;
-  const nomeFile = `${(chapter.label ?? String(chapter.number ?? 'capitolo')).replace(/[^\w-]/g, '')}-${meta.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50) || 'capitolo'}`;
+  const nomeFile = `${(chapter.label ?? String(chapter.number ?? 'capitolo')).replace(/[^\w-]/g, '')}-${
+    meta.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .slice(0, 50) || 'capitolo'
+  }`;
 
   const errori: string[] = [];
   let ultimoExportId: string | undefined;
@@ -303,7 +326,11 @@ export async function publishChapter(input: {
     action: 'chapter.published',
     entityType: 'chapter',
     entityId: chapter.id,
-    metadata: { formats: parsed.data.formats, versionNo: version.version_no, outputs: outputIds.length },
+    metadata: {
+      formats: parsed.data.formats,
+      versionNo: version.version_no,
+      outputs: outputIds.length,
+    },
   });
 
   revalidatePath(`/projects/${chapter.project_id}/exports`);
@@ -331,8 +358,10 @@ export async function getExportDownloadUrl(exportId: string): Promise<string | n
     .select('storage_bucket, storage_path, organization_id, status')
     .eq('id', exportId)
     .maybeSingle<{
-      storage_bucket: string; storage_path: string | null;
-      organization_id: string; status: string;
+      storage_bucket: string;
+      storage_path: string | null;
+      organization_id: string;
+      status: string;
     }>();
 
   if (!data?.storage_path || data.organization_id !== organization.id || data.status !== 'ready') {
@@ -380,9 +409,7 @@ export async function getVolumePreviewUrl(projectId: string): Promise<string | n
   const supabase = await createClient();
 
   const path = `${organization.id}/${projectId}/volume/anteprima.pdf`;
-  const { data } = await supabase.storage
-    .from('publication-exports')
-    .createSignedUrl(path, 3600);
+  const { data } = await supabase.storage.from('publication-exports').createSignedUrl(path, 3600);
 
   return data?.signedUrl ?? null;
 }

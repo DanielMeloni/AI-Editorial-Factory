@@ -50,6 +50,15 @@ interface RigaCapitolo {
   current_version_id: string | null;
 }
 
+export interface VersioneComponibile {
+  id: string;
+  chapter_id: string;
+  content_md: string;
+  version_no: number;
+  word_count: number;
+  parent_version_id: string | null;
+}
+
 /** Vero se il capitolo è stato approvato da una persona. */
 function approvato(capitolo: RigaCapitolo): boolean {
   if (capitolo.status === 'approved' || capitolo.status === 'published') return true;
@@ -106,36 +115,13 @@ export async function composeVolume(
 
   if (versioniError) throw new Error(`Lettura delle versioni fallita: ${versioniError.message}`);
 
-  const perId = new Map((versioni ?? []).map((versione) => [versione.id, versione]));
-
   const chapters: CapitoloVolume[] = [];
   for (const capitolo of candidati) {
-    let versione = perId.get(capitolo.current_version_id!);
-    // Alcuni output storici del revisore contenevano istruzioni del tipo
-    // “Sostituisci…” al posto del manoscritto completo. Per l'anteprima si
-    // risale alla versione genitore finché si trova un capitolo vero.
-    const visitati = new Set<string>();
-    while (
-      versione &&
-      sembraPromemoriaDiRevisione(versione.content_md) &&
-      versione.parent_version_id &&
-      !visitati.has(versione.id)
-    ) {
-      visitati.add(versione.id);
-      versione = perId.get(versione.parent_version_id);
-    }
-    // Anche una catena storica può essere spezzata. In quel caso scegliamo la
-    // versione completa più recente dello stesso capitolo, mai il memorandum.
-    if (!versione || sembraPromemoriaDiRevisione(versione.content_md)) {
-      versione = (versioni ?? [])
-        .filter(
-          (candidata) =>
-            candidata.chapter_id === capitolo.id &&
-            candidata.content_md.trim() !== '' &&
-            !sembraPromemoriaDiRevisione(candidata.content_md),
-        )
-        .sort((a, b) => b.version_no - a.version_no)[0];
-    }
+    const versione = scegliVersioneCompleta(
+      capitolo.id,
+      capitolo.current_version_id!,
+      versioni ?? [],
+    );
     if (!versione || versione.content_md.trim() === '') {
       pending.push({ title: capitolo.title, status: capitolo.status });
       continue;
@@ -164,10 +150,39 @@ export async function composeVolume(
   };
 }
 
-function sembraPromemoriaDiRevisione(contentMd: string): boolean {
+export function sembraPromemoriaDiRevisione(contentMd: string): boolean {
   const istruzioni =
     contentMd.match(/^\s*(?:[-*>]\s*)?(?:sostituisci|aggiungi|rimuovi|correggi)\b/gim)?.length ?? 0;
   return /(^|\n)#{1,3}\s+revisioni proposte\b/i.test(contentMd) && istruzioni >= 2;
+}
+
+/** Seleziona il manoscritto, risalendo oltre eventuali memorandum storici. */
+export function scegliVersioneCompleta(
+  chapterId: string,
+  currentVersionId: string,
+  versioni: VersioneComponibile[],
+): VersioneComponibile | undefined {
+  const perId = new Map(versioni.map((versione) => [versione.id, versione]));
+  let versione = perId.get(currentVersionId);
+  const visitati = new Set<string>();
+  while (
+    versione &&
+    sembraPromemoriaDiRevisione(versione.content_md) &&
+    versione.parent_version_id &&
+    !visitati.has(versione.id)
+  ) {
+    visitati.add(versione.id);
+    versione = perId.get(versione.parent_version_id);
+  }
+  if (versione && !sembraPromemoriaDiRevisione(versione.content_md)) return versione;
+  return versioni
+    .filter(
+      (candidata) =>
+        candidata.chapter_id === chapterId &&
+        candidata.content_md.trim() !== '' &&
+        !sembraPromemoriaDiRevisione(candidata.content_md),
+    )
+    .sort((a, b) => b.version_no - a.version_no)[0];
 }
 
 /** L'etichetta con cui il capitolo si presenta nell'indice e in testata. */

@@ -57,7 +57,7 @@ export async function rebuildVolumePreviewWith(
   const capitoliPdf = volume.chapters.map((capitolo) => ({
     label: etichettaCapitolo(capitolo),
     title: capitolo.title,
-    contentMd: capitolo.contentMd,
+    contentMd: normalizzaMarkdownPdf(capitolo.contentMd),
     versionNo: capitolo.versionNo,
     approved: capitolo.approvato,
     figures: figurePerCapitolo.get(capitolo.id) ?? [],
@@ -269,5 +269,7 @@ function isErroreGraficoPdf(error: unknown): boolean {
 }
 
 function normalizzaMarkdownPdf(markdown: string): string {
-  return markdown.replace(/\S{72,}/g, (token) => token.match(/.{1,48}/g)?.join('\u200b') ?? token);
+  return markdown
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/\S{72,}/g, (token) => token.match(/.{1,48}/g)?.join('\u200b') ?? token);
 }
