@@ -9,7 +9,7 @@ import { recordAudit } from '@/lib/security/audit';
 import { checkRateLimit } from '@/lib/security/rate-limit';
 import type { Citation, ExportMeta } from './markdown';
 import { exportHtml } from './html';
-import { exportPdf } from './pdf';
+import { exportPdf, exportVolumePdf, exportVolumePdfLineare } from './pdf';
 import { exportEpub } from './epub';
 import { deriveArticle, deriveLesson } from './derivations';
 import { rebuildVolumePreviewWith, type EsitoAnteprima } from './preview';
@@ -258,7 +258,7 @@ export async function publishChapter(input: {
           break;
         }
         case 'pdf':
-          bytes = await exportPdf(contenutoCompleto, meta, { citations });
+          bytes = await exportPdfRobusto(contenutoCompleto, meta, citations);
           break;
         case 'epub':
           bytes = await exportEpub(contenutoCompleto, meta, { citations });
@@ -293,7 +293,7 @@ export async function publishChapter(input: {
         .from('exports')
         .update({ status: 'failed', error: messaggio, completed_at: new Date().toISOString() })
         .eq('id', exportRow.id);
-      errori.push(`${formato}: non riuscito`);
+      errori.push(`${formato}: ${messaggio}`);
     }
   }
 
@@ -325,7 +325,58 @@ export async function publishChapter(input: {
 }
 
 function sanitizzaContenutoExport(markdown: string): string {
-  return markdown.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+  return markdown
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/\S{72,}/g, (token) => token.match(/.{1,48}/g)?.join('\u200b') ?? token);
+}
+
+async function exportPdfRobusto(
+  contentMd: string,
+  meta: ExportMeta,
+  citations: Citation[],
+): Promise<Uint8Array> {
+  try {
+    return await exportPdf(contentMd, meta, { citations });
+  } catch (error) {
+    if (
+      !/unsupported number|invalid image|unsupported image|image data/i.test(errorMessage(error))
+    ) {
+      throw error;
+    }
+  }
+
+  const capitolo = {
+    label: meta.chapterLabel ?? '',
+    title: meta.title,
+    contentMd,
+    versionNo: meta.versionNo,
+    approved: true,
+    figures: [],
+  };
+  const volumeMeta = {
+    projectTitle: meta.projectTitle,
+    subtitle: null,
+    author: meta.author,
+    volume: meta.volume,
+    generatedAt: new Date(meta.exportedAt).toLocaleString('it-IT'),
+    pending: 0,
+    drafts: 0,
+  };
+
+  try {
+    return await exportVolumePdf([capitolo], volumeMeta);
+  } catch (error) {
+    if (
+      !/unsupported number|invalid image|unsupported image|image data/i.test(errorMessage(error))
+    ) {
+      throw error;
+    }
+    return exportVolumePdfLineare([capitolo], volumeMeta);
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** URL di download a breve scadenza. I bucket restano privati. */
