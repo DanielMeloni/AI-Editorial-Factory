@@ -208,7 +208,9 @@ export async function createManualStructure(projectId: string): Promise<Structur
       for (const chapter of part.chapters) {
         orderIndex += 1;
         const baseSlug = slugify(chapter.title) || `capitolo-${orderIndex}`;
-        const content = `# ${chapter.title}\n\n## Obiettivo\n\n${chapter.objective}\n`;
+        // La struttura decide titolo, ordine e obiettivo, non scrive il
+        // capitolo. Il contenuto nasce soltanto nel workflow completo.
+        const content = '';
         const { data: insertedChapter, error: chapterError } = await supabase
           .from('chapters')
           .insert({
@@ -222,8 +224,8 @@ export async function createManualStructure(projectId: string): Promise<Structur
             slug: `${baseSlug}-${orderIndex}`,
             order_index: orderIndex,
             status: 'draft',
-            word_count: content.split(/\s+/).filter(Boolean).length,
-            heading_count: 2,
+            word_count: 0,
+            heading_count: 0,
           })
           .select('id')
           .single<{ id: string }>();
@@ -240,7 +242,7 @@ export async function createManualStructure(projectId: string): Promise<Structur
             content_md: content,
             content_hash: createHash('sha256').update(content).digest('hex'),
             summary: chapter.objective,
-            word_count: content.split(/\s+/).filter(Boolean).length,
+            word_count: 0,
             created_by: user.id,
           })
           .select('id')

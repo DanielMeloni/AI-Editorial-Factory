@@ -1,33 +1,39 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { AlertTriangle, FileStack, Layers, ListTree, Upload } from 'lucide-react';
+import { AlertTriangle, BookOpen, FileStack, Layers, ListTree, Upload } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert } from '@/components/ui/alert';
 import { buttonVariants } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { getCurrentManifest, getProject, getProjectStructure, listSources } from '@/lib/projects/queries';
+import { getCurrentManifest, getProject, getProjectStructure, listProjectVolumes, listSources } from '@/lib/projects/queries';
 import { etichettaDirezione } from '@/lib/editorial/direzione';
 import { etichettaBrief } from '@/lib/editorial/brief';
 import { DeleteProjectCard } from '@/components/projects/delete-project-card';
 import { getProjectProgress } from '@/lib/projects/progress';
 import { NextStepCard } from '@/components/projects/next-step-card';
+import { addProjectVolume } from '@/lib/projects/actions';
+import { ProjectVolumesAccordion } from '@/components/projects/project-volumes-accordion';
 
 export default async function ProjectOverviewPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ projectId: string }>;
+  searchParams: Promise<{ volume?: string }>;
 }) {
   const { projectId } = await params;
+  const { volume: requestedVolume } = await searchParams;
   const project = await getProject(projectId);
   if (!project) notFound();
 
-  const [sources, structure, manifest, progresso] = await Promise.all([
+  const [sources, structure, manifest, progresso, volumes] = await Promise.all([
     listSources(projectId),
     getProjectStructure(projectId),
     getCurrentManifest(projectId),
     getProjectProgress(projectId),
+    listProjectVolumes(projectId),
   ]);
 
   const erroriGravi = (manifest?.discrepancies ?? []).filter((d) => d.severity === 'error');
@@ -71,7 +77,17 @@ export default async function ProjectOverviewPage({
         }
       />
 
-      <NextStepCard progresso={progresso} />
+      <NextStepCard progresso={progresso} volumeId={volumes.some((v) => v.id === requestedVolume) ? requestedVolume : volumes[0]?.id} />
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3"><CardTitle className="flex items-center gap-2"><BookOpen className="size-5" aria-hidden="true" />Manuali della collana</CardTitle><form action={addProjectVolume}><input type="hidden" name="projectId" value={projectId} /><button className={buttonVariants({ variant: 'secondary' })}>Aggiungi volume</button></form></div>
+          <CardDescription>Un solo progetto, con una configurazione editoriale distinta per ciascun volume.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ProjectVolumesAccordion projectId={projectId} volumes={volumes} />
+        </CardContent>
+      </Card>
 
       {sources.length === 0 ? (
         <EmptyState

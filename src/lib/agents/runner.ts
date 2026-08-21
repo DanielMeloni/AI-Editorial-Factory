@@ -122,22 +122,38 @@ export async function runAgent<I, O>(
     if (useDeterministic) {
       output = agent.deterministic!(input);
     } else {
-      const result = await provider.generateStructured(
-        {
-          system: agent.system,
-          prompt: agent.buildPrompt(input),
-          temperature: 0.2,
-          maxOutputTokens: agent.maxOutputTokens,
-        },
-        agent.outputSchema,
-      );
-      output = result.data;
-      inputTokens = result.usage.inputTokens;
-      outputTokens = result.usage.outputTokens;
-      estimatedCostUsd = result.estimatedCostUsd;
-      effectiveProvider = result.provider;
-      effectiveModel = result.model;
-      warnings.push(...result.warnings);
+      try {
+        const result = await provider.generateStructured(
+          {
+            system: agent.system,
+            prompt: agent.buildPrompt(input),
+            temperature: 0.2,
+            maxOutputTokens: agent.maxOutputTokens,
+          },
+          agent.outputSchema,
+        );
+        output = result.data;
+        inputTokens = result.usage.inputTokens;
+        outputTokens = result.usage.outputTokens;
+        estimatedCostUsd = result.estimatedCostUsd;
+        effectiveProvider = result.provider;
+        effectiveModel = result.model;
+        warnings.push(...result.warnings);
+      } catch (error) {
+        // Una risposta semanticamente plausibile ma con forma sbagliata non
+        // deve bloccare un workflow se l'agente possiede un'alternativa
+        // deterministica verificabile. Il recupero vale soltanto per errori di
+        // schema: rete, autenticazione e limiti del provider restano errori.
+        const schemaError =
+          error instanceof ProviderError && /output non conforme allo schema/i.test(error.message);
+        if (!schemaError || !agent.deterministic) throw error;
+        output = agent.deterministic(input);
+        effectiveProvider = 'deterministic';
+        effectiveModel = `${agent.key}@${agent.version}`;
+        warnings.push(
+          `Output di «${provider.model}» non conforme allo schema; usata la selezione deterministica.`,
+        );
+      }
     }
 
     // Validazione dell'output anche sul percorso deterministico: un'implementazione
@@ -170,8 +186,8 @@ export async function runAgent<I, O>(
           input_tokens: inputTokens,
           output_tokens: outputTokens,
           estimated_cost_usd: estimatedCostUsd,
-          provider: useDeterministic ? 'deterministic' : effectiveProvider,
-          model: useDeterministic ? `${agent.key}@${agent.version}` : effectiveModel,
+          provider: effectiveProvider,
+          model: effectiveModel,
           duration_ms: durationMs,
           finished_at: new Date().toISOString(),
         })
@@ -183,8 +199,8 @@ export async function runAgent<I, O>(
         organization_id: context.organizationId,
         project_id: context.projectId,
         agent_run_id: agentRunId,
-        provider: useDeterministic ? 'deterministic' : effectiveProvider,
-        model: useDeterministic ? `${agent.key}@${agent.version}` : effectiveModel,
+        provider: effectiveProvider,
+        model: effectiveModel,
         kind: 'text',
         input_tokens: inputTokens,
         output_tokens: outputTokens,
@@ -195,9 +211,9 @@ export async function runAgent<I, O>(
     return {
       output: parsedOutput.data,
       agentRunId,
-      provider: useDeterministic ? 'deterministic' : effectiveProvider,
-      model: useDeterministic ? `${agent.key}@${agent.version}` : effectiveModel,
-      usedModel: !useDeterministic,
+      provider: effectiveProvider,
+      model: effectiveModel,
+      usedModel: effectiveProvider !== 'deterministic',
       warnings,
       estimatedCostUsd,
     };

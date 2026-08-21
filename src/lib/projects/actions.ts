@@ -20,7 +20,7 @@ export async function createProject(_prev: ActionState, formData: FormData): Pro
     title: formData.get('title'),
     subtitle: formData.get('subtitle') ?? '',
     author: formData.get('author') ?? '',
-    volume: formData.get('volume') ?? '',
+    volumeCount: formData.get('volumeCount') ?? '1',
     language: formData.get('language') ?? 'it',
     description: formData.get('description') ?? '',
     level: formData.get('level') ?? 'base',
@@ -68,7 +68,7 @@ export async function createProject(_prev: ActionState, formData: FormData): Pro
       title: parsed.data.title,
       subtitle: parsed.data.subtitle || null,
       author: parsed.data.author || '',
-      volume: parsed.data.volume || null,
+      volume: null,
       language: parsed.data.language,
       description: parsed.data.description || null,
       level: parsed.data.level,
@@ -101,6 +101,30 @@ export async function createProject(_prev: ActionState, formData: FormData): Pro
     };
   }
 
+  // Solo una collana può generare più manuali. Il vincolo vive anche sul
+  // server: nascondere il campo nell'interfaccia non sarebbe sufficiente.
+  const volumeCount = parsed.data.workShape === 'collana' ? parsed.data.volumeCount : 1;
+  const volumes = Array.from({ length: volumeCount }, (_, index) => ({
+    project_id: data.id,
+    organization_id: organization.id,
+    volume_number: index + 1,
+    title: parsed.data.title,
+    subtitle: parsed.data.subtitle || null,
+    level: parsed.data.level,
+    audience: parsed.data.audience || null,
+    scope: parsed.data.scope || null,
+    out_of_scope: parsed.data.outOfScope || null,
+    target_pages: typeof parsed.data.targetPages === 'number' ? parsed.data.targetPages : null,
+  }));
+  const { error: volumeError } = await supabase.from('project_volumes').insert(volumes);
+  if (volumeError) {
+    await supabase.from('projects').delete().eq('id', data.id);
+    return {
+      status: 'error',
+      message: `Configurazione dei volumi non riuscita: ${volumeError.message}. Applica la migration 20260820120001_project_volumes.sql.`,
+    };
+  }
+
   await recordAudit({
     organizationId: organization.id,
     actorId: user.id,
@@ -112,6 +136,48 @@ export async function createProject(_prev: ActionState, formData: FormData): Pro
 
   revalidatePath('/projects');
   redirect(`/projects/${data.id}`);
+}
+
+export async function addProjectVolume(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const organization = await requireOrganization();
+  const projectId = String(formData.get('projectId') ?? '');
+  const supabase = await createClient();
+  const { data: project } = await supabase.from('projects').select('title, subtitle, language, level, audience, scope, out_of_scope, target_pages')
+    .eq('id', projectId).maybeSingle();
+  if (!project) return;
+  const { data: last } = await supabase.from('project_volumes').select('volume_number')
+    .eq('project_id', projectId).order('volume_number', { ascending: false }).limit(1).maybeSingle<{ volume_number: number }>();
+  const { error } = await supabase.from('project_volumes').insert({
+    project_id: projectId, organization_id: organization.id,
+    volume_number: (last?.volume_number ?? 0) + 1, title: project.title,
+    subtitle: project.subtitle, level: project.level, audience: project.audience,
+    scope: project.scope, out_of_scope: project.out_of_scope, target_pages: project.target_pages,
+  });
+  if (error) throw new Error(`Creazione del volume fallita: ${error.message}`);
+  await recordAudit({ organizationId: organization.id, actorId: user.id, action: 'project.volume.created', entityType: 'project', entityId: projectId });
+  revalidatePath(`/projects/${projectId}`);
+}
+
+export async function updateProjectVolume(formData: FormData): Promise<void> {
+  await requireUser();
+  await requireOrganization();
+  const projectId = String(formData.get('projectId') ?? '');
+  const volumeId = String(formData.get('volumeId') ?? '');
+  const pagesValue = String(formData.get('targetPages') ?? '').trim();
+  const supabase = await createClient();
+  const { error } = await supabase.from('project_volumes').update({
+    title: String(formData.get('title') ?? '').trim(),
+    subtitle: String(formData.get('subtitle') ?? '').trim() || null,
+    level: String(formData.get('level') ?? 'base'),
+    audience: String(formData.get('audience') ?? '').trim() || null,
+    scope: String(formData.get('scope') ?? '').trim() || null,
+    out_of_scope: String(formData.get('outOfScope') ?? '').trim() || null,
+    target_pages: pagesValue ? Number(pagesValue) : null,
+  }).eq('id', volumeId).eq('project_id', projectId);
+  if (error) throw new Error(`Salvataggio del volume fallito: ${error.message}`);
+  revalidatePath(`/projects/${projectId}`);
+  redirect(`/projects/${projectId}`);
 }
 
 export interface UploadTicket {

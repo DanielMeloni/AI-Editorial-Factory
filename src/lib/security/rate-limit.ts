@@ -23,8 +23,12 @@ export interface RateLimit {
 }
 
 export const RATE_LIMITS = {
-  /** Avvii di workflow: un audit dura minuti e produce decine di scritture. */
-  workflowStart: { max: 20, windowMinutes: 60 },
+  /**
+   * Avvii di workflow. Un audit globale crea un'esecuzione per capitolo: il
+   * limite deve contenere almeno un manuale tecnico completo, non troncarlo al
+   * ventesimo capitolo. Resta abbastanza basso da fermare cicli accidentali.
+   */
+  workflowStart: { max: 100, windowMinutes: 60 },
   /** Generazione di immagini: è l'operazione più costosa. */
   imageGeneration: { max: 40, windowMinutes: 60 },
   /** Esportazioni: leggere per l'AI, pesanti per lo storage. */

@@ -14,6 +14,9 @@ import {
   PagineTotali,
 } from '@/components/structure/formato-stampa';
 import type { ChapterRow, ChapterStatus } from '@/lib/db/types';
+import { GlobalAuditButton } from '@/components/structure/global-audit-button';
+import { ChapterAuditStatus } from '@/components/structure/chapter-audit-status';
+import { listWorkflowRuns, type WorkflowRunRow } from '@/lib/workflows/queries';
 
 /**
  * Stato editoriale del capitolo, letto a colpo d'occhio sull'etichetta.
@@ -40,7 +43,7 @@ const KIND_LABELS: Record<string, string> = {
   back_matter: 'Chiusura',
 };
 
-function ChapterRowItem({ chapter, projectId }: { chapter: ChapterRow; projectId: string }) {
+function ChapterRowItem({ chapter, projectId, run }: { chapter: ChapterRow; projectId: string; run: WorkflowRunRow | null }) {
   const etichetta =
     chapter.kind === 'appendix'
       ? `Appendice ${chapter.label ?? ''}`.trim()
@@ -73,6 +76,7 @@ function ChapterRowItem({ chapter, projectId }: { chapter: ChapterRow; projectId
           <Badge tone="warning">{chapter.placeholder_count} segnaposto</Badge>
         ) : null}
       </span>
+      <ChapterAuditStatus chapterId={chapter.id} initialRun={run} initialWords={chapter.word_count} />
     </li>
   );
 }
@@ -86,10 +90,13 @@ export default async function StructurePage({
   const project = await getProject(projectId);
   if (!project) notFound();
 
-  const [structure, cover] = await Promise.all([
+  const [structure, cover, runs] = await Promise.all([
     getProjectStructure(projectId),
     getCover(projectId),
+    listWorkflowRuns(projectId),
   ]);
+  const latestRun = new Map<string, WorkflowRunRow>();
+  for (const run of runs) if (run.chapter_id && !latestRun.has(run.chapter_id)) latestRun.set(run.chapter_id, run);
 
   // Il «formato libro» non è un valore di comodo: sono le misure rifilate
   // decise nel Cover Studio, quando ci sono.
@@ -107,7 +114,7 @@ export default async function StructurePage({
             ? 'La struttura viene ricostruita al primo caricamento di un archivio.'
             : `${structure.totals.chapters} capitoli, ${structure.totals.appendices} appendici, ${structure.totals.words.toLocaleString('it-IT')} parole.`
         }
-        actions={<RebuildBibliographyButton projectId={projectId} />}
+        actions={<div className="flex flex-wrap gap-2"><GlobalAuditButton projectId={projectId} disabled={vuoto || structure.totals.chapters === 0} /><RebuildBibliographyButton projectId={projectId} /></div>}
       />
 
       {!vuoto ? (
@@ -152,7 +159,7 @@ export default async function StructurePage({
               <CardContent className="p-0">
                 <ul>
                   {part.chapters.map((chapter) => (
-                    <ChapterRowItem key={chapter.id} chapter={chapter} projectId={projectId} />
+                    <ChapterRowItem key={chapter.id} chapter={chapter} projectId={projectId} run={latestRun.get(chapter.id) ?? null} />
                   ))}
                 </ul>
               </CardContent>
@@ -170,7 +177,7 @@ export default async function StructurePage({
               <CardContent className="p-0">
                 <ul>
                   {structure.orphanChapters.map((chapter) => (
-                    <ChapterRowItem key={chapter.id} chapter={chapter} projectId={projectId} />
+                    <ChapterRowItem key={chapter.id} chapter={chapter} projectId={projectId} run={latestRun.get(chapter.id) ?? null} />
                   ))}
                 </ul>
               </CardContent>

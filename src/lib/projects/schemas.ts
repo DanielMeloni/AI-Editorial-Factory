@@ -16,7 +16,7 @@ export const createProjectSchema = z.object({
   title: z.string().trim().min(2, 'Il titolo deve avere almeno 2 caratteri').max(200),
   subtitle: z.string().trim().max(300).optional().or(z.literal('')),
   author: z.string().trim().max(200).optional().or(z.literal('')),
-  volume: z.string().trim().max(100).optional().or(z.literal('')),
+  volumeCount: z.coerce.number().int().min(1, 'Inserisci almeno un volume').max(20, 'Massimo 20 volumi iniziali').default(1),
   language: z
     .string()
     .trim()

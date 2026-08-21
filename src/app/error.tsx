@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect } from 'react';
 import Link from 'next/link';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Alert } from '@/components/ui/alert';
@@ -24,10 +23,6 @@ export default function GlobalError({
   reset: () => void;
 }) {
   const inSviluppo = process.env.NODE_ENV === 'development';
-
-  useEffect(() => {
-    console.error('Errore non gestito', error.digest ?? error.message);
-  }, [error]);
 
   // Le cause più frequenti in prima installazione, riconosciute dal messaggio.
   const messaggio = error.message ?? '';

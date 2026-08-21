@@ -348,6 +348,10 @@ export const chapterDraftInputSchema = z.object({
   evidence: z.string(),
   /** Testo già presente: per un segnaposto è il solo titolo con l'obiettivo. */
   existingContent: z.string(),
+  /** Indice completo: colloca il capitolo nel percorso del manuale. */
+  manualOutline: z.array(z.string().max(300)).max(200),
+  /** Contenuti già convalidati che questo capitolo può dare per acquisiti. */
+  previousChapters: z.array(z.object({ title: z.string().max(300), summary: z.string().max(2000) })).max(100),
 });
 
 export type ChapterDraftInput = z.infer<typeof chapterDraftInputSchema>;
@@ -406,7 +410,9 @@ export const chapterSectionOutputSchema = z.object({
   /** La sola sezione, con il proprio titolo di secondo livello. */
   contentMd: z.string().min(1),
   /** Punti che le fonti non coprono, dichiarati invece che colmati. */
-  gaps: z.array(z.string().max(300)).max(10),
+  // La lunghezza viene normalizzata dal workflow: una spiegazione prolissa
+  // non deve rendere invalida un'intera sezione già scritta.
+  gaps: z.array(z.string()).max(10),
 });
 
 export type ChapterSectionOutput = z.infer<typeof chapterSectionOutputSchema>;
@@ -429,7 +435,7 @@ export const chapterApparatusOutputSchema = z.object({
     .max(8),
   /** Il laboratorio con cui si chiude ogni capitolo del volume. */
   lab: z.string().max(4000),
-  gaps: z.array(z.string().max(300)).max(10),
+  gaps: z.array(z.string()).max(10),
 });
 
 export type ChapterApparatusOutput = z.infer<typeof chapterApparatusOutputSchema>;

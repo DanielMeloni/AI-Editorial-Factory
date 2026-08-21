@@ -215,21 +215,20 @@ export async function getToolLogo(projectId: string): Promise<CoverArtworkRow | 
     .from('visual_assets')
     .select('*')
     .eq('project_id', projectId)
-    .eq('kind', 'logo')
     .eq('generator', 'upload')
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle<AssetRow>();
+    .returns<AssetRow[]>();
 
   if (error) throw new Error(`Lettura del logo fallita: ${error.message}`);
-  if (!data) return null;
-  if (!data.storage_path) return { asset: data, signedUrl: null };
+  const logo = (data ?? []).find(isToolLogoAsset);
+  if (!logo) return null;
+  if (!logo.storage_path) return { asset: logo, signedUrl: null };
 
   const { data: firmato } = await supabase.storage
-    .from(data.storage_bucket ?? 'generated-assets')
-    .createSignedUrl(data.storage_path, 3600);
+    .from(logo.storage_bucket ?? 'generated-assets')
+    .createSignedUrl(logo.storage_path, 3600);
 
-  return { asset: data, signedUrl: firmato?.signedUrl ?? null };
+  return { asset: logo, signedUrl: firmato?.signedUrl ?? null };
 }
 
 /**
@@ -243,25 +242,29 @@ export async function getToolLogo(projectId: string): Promise<CoverArtworkRow | 
 export async function getToolLogoDataUrl(projectId: string): Promise<string | null> {
   const supabase = await createClient();
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('visual_assets')
-    .select('storage_bucket, storage_path')
+    .select('kind, storage_bucket, storage_path')
     .eq('project_id', projectId)
-    .eq('kind', 'logo')
     .eq('generator', 'upload')
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle<{ storage_bucket: string | null; storage_path: string | null }>();
+    .returns<{ kind: string; storage_bucket: string | null; storage_path: string | null }[]>();
 
-  if (!data?.storage_path) return null;
+  if (error) throw new Error(`Lettura del logo fallita: ${error.message}`);
+  const logo = (data ?? []).find(isToolLogoAsset);
+  if (!logo?.storage_path) return null;
 
   const { data: file } = await supabase.storage
-    .from(data.storage_bucket ?? 'generated-assets')
-    .download(data.storage_path);
+    .from(logo.storage_bucket ?? 'generated-assets')
+    .download(logo.storage_path);
 
   if (!file) return null;
 
   const bytes = Buffer.from(await file.arrayBuffer());
   const mime = file.type || 'image/png';
   return `data:${mime};base64,${bytes.toString('base64')}`;
+}
+
+function isToolLogoAsset(asset: { kind: string; storage_path: string | null }): boolean {
+  return asset.kind === 'logo' || asset.storage_path?.includes('/tool-logo/') === true;
 }

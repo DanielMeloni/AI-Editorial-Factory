@@ -31,6 +31,7 @@ import type {
   VerifiableClaim,
   VisualPlanOutput,
 } from '@/lib/agents/schemas';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Step del workflow di audit.
@@ -46,6 +47,39 @@ export interface RunContext {
   projectId: string;
   chapterId: string;
   actorId: string | null;
+}
+
+/** Avvia il capitolo seguente della coda quando il corrente è da revisionare. */
+export async function startNextGlobalChapter(context: RunContext): Promise<string | null> {
+  'use step';
+  const db = createAdminClient();
+  const { data: next } = await db.from('chapters').select('id, title')
+    .eq('project_id', context.projectId).eq('status', 'draft')
+    .neq('id', context.chapterId).order('order_index').limit(1)
+    .maybeSingle<{ id: string; title: string }>();
+  if (!next) return null;
+  const { data: active } = await db.from('workflow_runs').select('id').eq('chapter_id', next.id)
+    .in('status', ['queued', 'running', 'awaiting_approval']).limit(1);
+  if ((active?.length ?? 0) > 0) return null;
+
+  const resumeToken = randomUUID();
+  const { data: run, error } = await db.from('workflow_runs').insert({
+    project_id: context.projectId, organization_id: context.organizationId,
+    chapter_id: next.id, kind: 'chapter-audit', status: 'queued', total_steps: 14,
+    input: { chapterTitle: next.title, resumeToken, globalSequence: true },
+    started_by: context.actorId, started_at: new Date().toISOString(),
+  }).select('id').single<{ id: string }>();
+  if (error || !run) throw new Error(`Preparazione del capitolo successivo fallita: ${error?.message ?? 'riga non creata'}`);
+
+  const [{ start }, { chapterAuditWorkflow }] = await Promise.all([
+    import('workflow/api'), import('./chapter-audit'),
+  ]);
+  const started = await start(chapterAuditWorkflow, [{
+    workflowRunId: run.id, organizationId: context.organizationId, projectId: context.projectId,
+    chapterId: next.id, actorId: context.actorId, resumeToken, globalSequence: true,
+  }]);
+  await db.from('workflow_runs').update({ external_run_id: started.runId ?? null }).eq('id', run.id);
+  return run.id;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,6 +226,13 @@ function componiCapitolo(
   return parti.join('\n');
 }
 
+/** Compatta una lacuna per log e interfaccia senza rigettare l'output AI. */
+function normalizzaGap(value: string): string {
+  const compatto = value.replace(/\s+/g, ' ').trim();
+  if (compatto.length <= 300) return compatto;
+  return `${compatto.slice(0, 297).trimEnd()}…`;
+}
+
 /**
  * Scrive il capitolo per intero prima che l'audit lo esamini.
  *
@@ -216,7 +257,7 @@ export async function draftChapter(
 
   const db = createAdminClient();
 
-  const [{ data: chapterRow }, { data: project }] = await Promise.all([
+  const [{ data: chapterRow }, { data: project }, { data: baseVersion }, { data: manualChapters }] = await Promise.all([
     db.from('chapters').select('part_id').eq('id', context.chapterId)
       .maybeSingle<{ part_id: string | null }>(),
     db.from('projects')
@@ -236,6 +277,11 @@ export async function draftChapter(
         out_of_scope: string | null;
         audience: string | null;
       }>(),
+    db.from('chapter_versions').select('summary').eq('id', baseVersionId)
+      .maybeSingle<{ summary: string | null }>(),
+    db.from('chapters').select('id, number, title, status, current_version_id, order_index')
+      .eq('project_id', context.projectId).neq('kind', 'back_matter').order('order_index')
+      .returns<{ id: string; number: number | null; title: string; status: string; current_version_id: string | null; order_index: number }[]>(),
   ]);
 
   const { data: part } = chapterRow?.part_id
@@ -270,6 +316,15 @@ export async function draftChapter(
 
   // L'obiettivo è ciò che la fase di struttura ha promesso per questo capitolo.
   const obiettivo = chapter.contentMd.match(/##\s*Obiettivo\s*\n+([\s\S]*?)(?:\n#{1,2}\s|$)/i);
+  const precedenti = (manualChapters ?? []).filter((item) =>
+    item.order_index < ((manualChapters ?? []).find((candidate) => candidate.id === context.chapterId)?.order_index ?? 0)
+    && ['in_review', 'approved', 'published'].includes(item.status) && item.current_version_id,
+  );
+  const { data: previousVersions } = precedenti.length > 0
+    ? await db.from('chapter_versions').select('id, summary, content_md')
+        .in('id', precedenti.map((item) => item.current_version_id!))
+        .returns<{ id: string; summary: string | null; content_md: string }[]>()
+    : { data: [] as { id: string; summary: string | null; content_md: string }[] };
 
   // Quanti capitoli si dividono il budget: quelli di chiusura generati da
   // codice non consumano quota, perché non li scrive un modello.
@@ -289,7 +344,7 @@ export async function draftChapter(
     chapterId: chapter.chapterId,
     number: chapter.number,
     title: chapter.title,
-    objective: (obiettivo?.[1] ?? '').trim().slice(0, 2000),
+    objective: (obiettivo?.[1] ?? baseVersion?.summary ?? '').trim().slice(0, 2000),
     partTitle: part?.title ?? null,
     language: project?.language ?? 'it',
     // Senza questo, tre volumi sullo stesso argomento produrrebbero lo stesso
@@ -325,6 +380,11 @@ export async function draftChapter(
     })),
     evidence,
     existingContent: chapter.contentMd,
+    manualOutline: (manualChapters ?? []).map((item) => `${item.number ?? '—'}. ${item.title}`),
+    previousChapters: precedenti.map((item) => {
+      const version = previousVersions?.find((candidate) => candidate.id === item.current_version_id);
+      return { title: item.title, summary: (version?.summary || version?.content_md.slice(0, 1200) || 'Capitolo già elaborato.').slice(0, 2000) };
+    }),
   };
 
   const contesto = {
@@ -362,7 +422,7 @@ export async function draftChapter(
       )
     ).output;
     sezioni.push(scritta.contentMd.trim());
-    gaps.push(...scritta.gaps);
+    gaps.push(...scritta.gaps.map(normalizzaGap));
   }
 
   const corpo = sezioni.join('\n\n');
@@ -376,7 +436,7 @@ export async function draftChapter(
       contesto,
     )
   ).output;
-  gaps.push(...apparato.gaps);
+  gaps.push(...apparato.gaps.map(normalizzaGap));
 
   const contentMd = componiCapitolo(
     chapter.number,

@@ -70,6 +70,23 @@ export interface ProjectSourceRow {
   extracted_at: string | null;
 }
 
+export interface ProjectVolumeRow {
+  id: string;
+  project_id: string;
+  organization_id: string;
+  volume_number: number;
+  title: string;
+  subtitle: string | null;
+  level: 'base' | 'intermediate' | 'advanced';
+  audience: string | null;
+  scope: string | null;
+  out_of_scope: string | null;
+  target_pages: number | null;
+  status: ProjectStatus;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SourceFileRow {
   id: string;
   normalized_path: string;

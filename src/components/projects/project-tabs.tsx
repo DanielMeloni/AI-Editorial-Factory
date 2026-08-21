@@ -1,145 +1,42 @@
 'use client';
 
-import { Fragment } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { Check, Circle, Lock } from 'lucide-react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Check, Circle } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
-import { COMING_SOON_LABEL } from '@/lib/navigation/items';
+import type { ProjectVolumeRow } from '@/lib/db/types';
 import type { StatoScheda } from '@/lib/projects/progress';
 
-/**
- * Le schede del progetto come flusso.
- *
- * L'ordine è quello in cui si lavora e il colore dice a che punto è ciascuna
- * tappa: verde ciò che è concluso, giallo ciò che aspetta te, grigio ciò che
- * dipende ancora da qualcos'altro. Sono gli stessi tre stati dell'anello nella
- * panoramica — una barra che usasse colori diversi racconterebbe due storie
- * dello stesso lavoro.
- *
- * Le schede che non sono una tappa — le esecuzioni, le figure, le pubblicazioni
- * — restano neutre. Colorarle direbbe qualcosa che non è vero: non c'è un
- * momento in cui le esecuzioni sono «concluse».
- */
+const FASI = [
+  { segment: 'sources', label: 'Fonti', numero: 1 },
+  { segment: 'structure', label: 'Struttura', numero: 2 },
+  { segment: 'structure', label: 'Stesura e audit', numero: 3 },
+  { segment: 'reviews', label: 'Revisioni', numero: 4 },
+  { segment: 'cover-studio', label: 'Copertina', numero: 5 },
+  { segment: 'preview', label: 'Anteprima', numero: 6 },
+  { segment: 'blog', label: 'Blog', numero: 7 },
+  { segment: 'courses', label: 'Corsi', numero: 7 },
+  { segment: 'exports', label: 'Pubblicazioni', numero: 7 },
+] as const;
+const STRUMENTI = [
+  { segment: '', label: 'Panoramica' }, { segment: 'workflows', label: 'Esecuzioni' },
+  { segment: 'visual-studio', label: 'Figure' },
+] as const;
 
-interface Tab {
-  segment: string;
-  label: string;
-  available: boolean;
-  /** Fase del lavoro a cui la scheda appartiene. */
-  fase: string;
-}
-
-const TABS: Tab[] = [
-  { segment: '', label: 'Panoramica', available: true, fase: '' },
-
-  { segment: 'sources', label: 'Fonti', available: true, fase: 'Preparazione' },
-  { segment: 'structure', label: 'Struttura', available: true, fase: 'Preparazione' },
-
-  { segment: 'reviews', label: 'Revisioni', available: true, fase: 'Lavorazione' },
-  { segment: 'workflows', label: 'Esecuzioni', available: true, fase: 'Lavorazione' },
-
-  { segment: 'visual-studio', label: 'Figure', available: true, fase: 'Visuale' },
-  { segment: 'cover-studio', label: 'Copertina', available: true, fase: 'Visuale' },
-
-  { segment: 'preview', label: 'Anteprima', available: true, fase: 'Uscita' },
-  { segment: 'blog', label: 'Blog', available: true, fase: 'Uscita' },
-  { segment: 'courses', label: 'Corsi', available: true, fase: 'Uscita' },
-  { segment: 'exports', label: 'Pubblicazioni', available: true, fase: 'Uscita' },
-
-  { segment: 'settings', label: 'Impostazioni', available: false, fase: '' },
-];
-
-const SEGNO = {
-  pronto: { classe: 'text-success', etichetta: 'concluso' },
-  attesa: { classe: 'text-warning', etichetta: 'aspetta te' },
-  bloccata: { classe: 'text-muted-foreground/50', etichetta: 'non ancora disponibile' },
-} as const;
-
-function Indicatore({ stato }: { stato: StatoScheda }) {
-  if (stato === 'pronto') return <Check className="size-3.5 shrink-0" aria-hidden="true" />;
-  if (stato === 'attesa')
-    return <Circle className="size-2.5 shrink-0 fill-current" aria-hidden="true" />;
-  return <Lock className="size-3 shrink-0" aria-hidden="true" />;
-}
-
-export function ProjectTabs({
-  projectId,
-  stati = {},
-}: {
-  projectId: string;
-  /** Stato per segmento. Assente significa: scheda che non è una tappa. */
-  stati?: Partial<Record<string, StatoScheda>>;
-}) {
-  const pathname = usePathname();
-  const base = `/projects/${projectId}`;
-
-  return (
-    <nav aria-label="Sezioni del progetto" className="border-b border-border-subtle">
-      <ul className="flex items-center gap-0.5 overflow-x-auto">
-        {TABS.map((tab, indice) => {
-          const href = tab.segment ? `${base}/${tab.segment}` : base;
-          const isActive = tab.segment ? pathname.startsWith(href) : pathname === base;
-          const apreFase = tab.fase !== '' && TABS[indice - 1]?.fase !== tab.fase;
-          const stato = stati[tab.segment];
-
-          if (!tab.available) {
-            return (
-              <li key={tab.label}>
-                <span
-                  aria-disabled="true"
-                  title={COMING_SOON_LABEL}
-                  className="flex cursor-not-allowed items-center whitespace-nowrap border-b-2 border-transparent px-3 py-2.5 text-sm text-muted-foreground/50"
-                >
-                  {tab.label}
-                  <span className="sr-only">{COMING_SOON_LABEL}</span>
-                </span>
-              </li>
-            );
-          }
-
-          return (
-            <Fragment key={tab.label}>
-              {apreFase ? (
-                <li
-                  aria-hidden="true"
-                  className="flex items-center whitespace-nowrap pl-2 pr-1 text-[10px] uppercase tracking-wider text-muted-foreground/60"
-                >
-                  {tab.fase}
-                </li>
-              ) : null}
-
-              <li>
-                <Link
-                  href={href}
-                  aria-current={isActive ? 'page' : undefined}
-                  title={stato ? `${tab.label} — ${SEGNO[stato].etichetta}` : tab.label}
-                  className={cn(
-                    'flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors',
-                    isActive
-                      ? 'border-primary text-primary'
-                      : 'border-transparent text-muted-foreground hover:border-border-strong hover:text-foreground',
-                  )}
-                >
-                  {stato ? (
-                    <span className={cn('flex items-center', SEGNO[stato].classe)}>
-                      <Indicatore stato={stato} />
-                    </span>
-                  ) : null}
-
-                  {tab.label}
-
-                  {/* Il colore non basta: lo stato va detto anche a parole. */}
-                  {stato ? (
-                    <span className="sr-only"> — {SEGNO[stato].etichetta}</span>
-                  ) : null}
-                  <span className="sr-only">{tab.fase ? ` — fase ${tab.fase}` : ''}</span>
-                </Link>
-              </li>
-            </Fragment>
-          );
-        })}
-      </ul>
-    </nav>
-  );
+export function ProjectTabs({ projectId, stati = {}, volumes }: { projectId: string; stati?: Partial<Record<string, StatoScheda>>; volumes: ProjectVolumeRow[] }) {
+  const pathname = usePathname(); const router = useRouter(); const params = useSearchParams();
+  const selected = params.get('volume') ?? volumes[0]?.id ?? ''; const base = `/projects/${projectId}`;
+  const hrefFor = (segment: string) => `${segment ? `${base}/${segment}` : base}${selected ? `?volume=${selected}` : ''}`;
+  return <nav aria-label="Flusso del volume" className="space-y-2 py-2">
+    <div className="flex min-w-max items-center gap-3">
+      {volumes.length ? <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">MANUALE<select value={selected} onChange={(event) => { const query = new URLSearchParams(params.toString()); query.set('volume', event.target.value); router.push(`${pathname}?${query}`); }} className="h-8 max-w-72 rounded-full border border-border-strong bg-surface px-3 text-sm font-medium text-foreground">{volumes.map((v) => <option key={v.id} value={v.id}>Volume {v.volume_number} · {v.subtitle || v.title}</option>)}</select></label> : null}
+      <div className="h-5 w-px bg-border-subtle" aria-hidden="true" />
+      <ol className="flex items-center gap-1 overflow-x-auto">{FASI.map((fase, index) => {
+        const href = hrefFor(fase.segment); const active = pathname.startsWith(`${base}/${fase.segment}`);
+        const stato = fase.numero === 7 ? (stati.exports ?? 'bloccata') : (stati[fase.segment] ?? 'bloccata');
+        return <li key={`${fase.label}-${index}`}><Link href={href} aria-current={active ? 'step' : undefined} className={cn('flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors', active ? 'border-primary bg-primary/10 text-primary' : 'border-transparent text-muted-foreground hover:border-border-strong hover:text-foreground')}><span className={cn('flex size-5 items-center justify-center rounded-full text-[11px] font-semibold', stato === 'pronto' ? 'bg-success-surface text-success' : stato === 'attesa' ? 'bg-warning-surface text-warning' : 'bg-surface-muted text-muted-foreground')}>{stato === 'pronto' ? <Check className="size-3" /> : fase.numero}</span>{fase.label}{stato === 'attesa' ? <Circle className="size-2 fill-current text-warning" /> : null}</Link></li>;
+      })}</ol>
+    </div>
+    <div className="flex items-center gap-1 overflow-x-auto border-t border-border-subtle pt-2"><span className="mr-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">Strumenti</span>{STRUMENTI.map((item) => { const href = hrefFor(item.segment); const active = item.segment ? pathname.startsWith(`${base}/${item.segment}`) : pathname === base; return <Link key={item.label} href={href} className={cn('whitespace-nowrap rounded-md px-2.5 py-1 text-xs', active ? 'bg-surface-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>{item.label}</Link>; })}</div>
+  </nav>;
 }

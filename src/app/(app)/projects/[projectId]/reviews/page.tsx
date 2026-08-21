@@ -2,7 +2,6 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { ListChecks } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
-import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { getProject } from '@/lib/projects/queries';
@@ -57,7 +56,7 @@ export default async function ReviewsPage({
           description="Le revisioni nascono dall'audit tecnico di un capitolo: avvialo dalla scheda Struttura."
         />
       ) : (
-        <ul className="space-y-3">
+        <div className="space-y-3">
           {reviews.map((review) => {
             const stato = STATO[review.status];
             const capitolo = review.chapters;
@@ -70,10 +69,8 @@ export default async function ReviewsPage({
               : '';
 
             return (
-              <li key={review.id}>
-                <Link href={`/projects/${projectId}/reviews/${review.id}`} className="block">
-                  <Card className="transition-shadow hover:shadow-md">
-                    <CardContent className="flex flex-wrap items-start justify-between gap-3 p-5">
+              <details key={review.id} className="group overflow-hidden rounded-lg border border-border-subtle bg-surface" open={review.status === 'pending'}>
+                <summary className="flex cursor-pointer list-none flex-wrap items-start justify-between gap-3 p-5 hover:bg-surface-muted">
                       <div className="min-w-0 space-y-1">
                         <p className="font-medium text-foreground">
                           {etichetta ? `${etichetta} — ` : ''}
@@ -90,13 +87,15 @@ export default async function ReviewsPage({
                         </p>
                       </div>
                       <Badge tone={stato.tone}>{stato.label}</Badge>
-                    </CardContent>
-                  </Card>
-                </Link>
-              </li>
+                </summary>
+                <div className="border-t border-border-subtle p-5">
+                  <p className="mb-4 text-sm text-muted-foreground">Apri il banco di revisione per confrontare originale e proposta, modificare il testo, approvare tutto o solo singoli interventi. Dopo l’approvazione il capitolo viene inserito automaticamente nell’anteprima.</p>
+                  <Link href={`/projects/${projectId}/reviews/${review.id}`} className="inline-flex h-10 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground">Revisiona questo capitolo</Link>
+                </div>
+              </details>
             );
           })}
-        </ul>
+        </div>
       )}
     </main>
   );

@@ -775,7 +775,7 @@ export async function confirmCoverReference(input: {
     return { ok: false, message: 'Percorso non valido.' };
   }
 
-  const { error } = await supabase.from('visual_assets').insert({
+  const asset = {
     id: input.assetId,
     project_id: input.projectId,
     organization_id: organization.id,
@@ -799,7 +799,14 @@ export async function confirmCoverReference(input: {
     storage_path: input.path,
     cost_usd: 0,
     created_by: user.id,
-  });
+  };
+
+  let { error } = await supabase.from('visual_assets').insert({ ...asset, kind: 'logo' });
+  // Compatibilità con database creati prima del valore enum `logo`. Il
+  // percorso dedicato identifica l'asset senza affidarsi al nome del file.
+  if (error && /invalid input value for enum asset_kind:\s*["']logo["']/i.test(error.message)) {
+    ({ error } = await supabase.from('visual_assets').insert({ ...asset, kind: 'other' }));
+  }
 
   if (error) {
     await supabase.storage.from('generated-assets').remove([input.path]);
@@ -955,14 +962,13 @@ export async function confirmToolLogo(input: {
   // progetto sarebbe rimasto senza logo per colpa di una sostituzione.
   const { data: vecchi } = await supabase
     .from('visual_assets')
-    .select('id, storage_bucket, storage_path')
+    .select('id, kind, storage_bucket, storage_path')
     .eq('project_id', input.projectId)
-    .eq('kind', 'logo')
     .eq('generator', 'upload')
     .neq('id', input.assetId)
-    .returns<{ id: string; storage_bucket: string | null; storage_path: string | null }[]>();
+    .returns<{ id: string; kind: string; storage_bucket: string | null; storage_path: string | null }[]>();
 
-  for (const vecchio of vecchi ?? []) {
+  for (const vecchio of (vecchi ?? []).filter(isToolLogoAsset)) {
     if (vecchio.storage_path) {
       await supabase.storage
         .from(vecchio.storage_bucket ?? 'generated-assets')
@@ -995,7 +1001,7 @@ export async function deleteToolLogo(assetId: string): Promise<VisualActionResul
   if (!asset || asset.organization_id !== organization.id) {
     return { ok: false, message: 'Logo non trovato.' };
   }
-  if (asset.kind !== 'logo' || asset.generator !== 'upload') {
+  if (!isToolLogoAsset(asset) || asset.generator !== 'upload') {
     return { ok: false, message: 'Questo asset non è il logo dello strumento.' };
   }
 
@@ -1010,4 +1016,8 @@ export async function deleteToolLogo(assetId: string): Promise<VisualActionResul
   revalidatePath(`/projects/${asset.project_id}/cover-studio`);
   revalidatePath(`/projects/${asset.project_id}/courses`);
   return { ok: true, message: 'Logo rimosso.' };
+}
+
+function isToolLogoAsset(asset: { kind: string; storage_path: string | null }): boolean {
+  return asset.kind === 'logo' || asset.storage_path?.includes('/tool-logo/') === true;
 }

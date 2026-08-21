@@ -2,7 +2,7 @@ import 'server-only';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { composeVolume, etichettaCapitolo } from './volume';
-import { exportVolumePdf, type VolumeFigure } from './pdf';
+import { exportVolumePdf, exportVolumePdfLineare, type VolumeFigure } from './pdf';
 
 /**
  * Anteprima del volume in PDF.
@@ -36,8 +36,12 @@ export async function rebuildVolumePreviewWith(
     .select('id, organization_id, title, subtitle, author, volume')
     .eq('id', input.projectId)
     .maybeSingle<{
-      id: string; organization_id: string; title: string;
-      subtitle: string | null; author: string; volume: string | null;
+      id: string;
+      organization_id: string;
+      title: string;
+      subtitle: string | null;
+      author: string;
+      volume: string | null;
     }>();
 
   if (!project || project.organization_id !== input.organizationId) {
@@ -50,25 +54,48 @@ export async function rebuildVolumePreviewWith(
     volume.chapters.map((capitolo) => capitolo.id),
   );
 
-  const bytes = await exportVolumePdf(
-    volume.chapters.map((capitolo) => ({
-      label: etichettaCapitolo(capitolo),
-      title: capitolo.title,
-      contentMd: capitolo.contentMd,
-      versionNo: capitolo.versionNo,
-      approved: capitolo.approvato,
-      figures: figurePerCapitolo.get(capitolo.id) ?? [],
-    })),
-    {
-      projectTitle: project.title,
-      subtitle: project.subtitle,
-      author: project.author,
-      volume: project.volume,
-      generatedAt: new Date().toLocaleString('it-IT'),
-      pending: volume.pending.length,
-      drafts: volume.chapters.filter((capitolo) => !capitolo.approvato).length,
-    },
-  );
+  const capitoliPdf = volume.chapters.map((capitolo) => ({
+    label: etichettaCapitolo(capitolo),
+    title: capitolo.title,
+    contentMd: capitolo.contentMd,
+    versionNo: capitolo.versionNo,
+    approved: capitolo.approvato,
+    figures: figurePerCapitolo.get(capitolo.id) ?? [],
+  }));
+  const metaPdf = {
+    projectTitle: project.title,
+    subtitle: project.subtitle,
+    author: project.author,
+    volume: project.volume,
+    generatedAt: new Date().toLocaleString('it-IT'),
+    pending: volume.pending.length,
+    drafts: volume.chapters.filter((capitolo) => !capitolo.approvato).length,
+  };
+
+  let bytes: Uint8Array;
+  let contenutiProblematiciEsclusi = false;
+  try {
+    bytes = await exportVolumePdf(capitoliPdf, metaPdf);
+  } catch (error) {
+    // Oltre ai raster corrotti, blocchi Mermaid/codice molto lunghi possono
+    // produrre coordinate fuori scala in Yoga/PDFKit. Il secondo tentativo
+    // isola tutte le figure e rende interrompibili i token del Markdown.
+    if (!isErroreGraficoPdf(error)) {
+      throw error;
+    }
+    contenutiProblematiciEsclusi = true;
+    const capitoliNormalizzati = capitoliPdf.map((capitolo) => ({
+      ...capitolo,
+      contentMd: normalizzaMarkdownPdf(capitolo.contentMd),
+      figures: [],
+    }));
+    try {
+      bytes = await exportVolumePdf(capitoliNormalizzati, metaPdf);
+    } catch (fallbackError) {
+      if (!isErroreGraficoPdf(fallbackError)) throw fallbackError;
+      bytes = await exportVolumePdfLineare(capitoliNormalizzati, metaPdf);
+    }
+  }
 
   const storagePath = `${input.organizationId}/${input.projectId}/volume/anteprima.pdf`;
 
@@ -77,7 +104,10 @@ export async function rebuildVolumePreviewWith(
     .upload(storagePath, bytes, { contentType: 'application/pdf', upsert: true });
 
   if (uploadError) {
-    return { ok: false, message: `Salvataggio dell’anteprima non riuscito: ${uploadError.message}` };
+    return {
+      ok: false,
+      message: `Salvataggio dell’anteprima non riuscito: ${uploadError.message}`,
+    };
   }
 
   const checksum = await sha256Hex(bytes);
@@ -126,7 +156,7 @@ export async function rebuildVolumePreviewWith(
             volume.chapters.filter((capitolo) => !capitolo.approvato).length > 0
               ? `, di cui ${volume.chapters.filter((c) => !c.approvato).length} in bozza`
               : ''
-          }.`,
+          }${contenutiProblematiciEsclusi ? '. Figure o blocchi fuori scala sono stati isolati dal PDF' : ''}.`,
   };
 }
 
@@ -156,28 +186,41 @@ async function raccogliFigure(
 
   const { data: assets } = await supabase
     .from('visual_assets')
-    .select('chapter_id, title, caption, alt_text, mermaid_source, storage_bucket, storage_path, version, status')
+    .select(
+      'chapter_id, title, caption, alt_text, mermaid_source, storage_bucket, storage_path, version, status',
+    )
     .in('chapter_id', chapterIds)
     .eq('status', 'approved')
     .order('version', { ascending: true })
-    .returns<{
-      chapter_id: string | null; title: string | null; caption: string | null;
-      alt_text: string | null; mermaid_source: string | null;
-      storage_bucket: string | null; storage_path: string | null;
-      version: number; status: string;
-    }[]>();
+    .returns<
+      {
+        chapter_id: string | null;
+        title: string | null;
+        caption: string | null;
+        alt_text: string | null;
+        mermaid_source: string | null;
+        storage_bucket: string | null;
+        storage_path: string | null;
+        version: number;
+        status: string;
+      }[]
+    >();
 
   for (const asset of assets ?? []) {
     if (!asset.chapter_id) continue;
 
     let dataUrl: string | null = null;
+    let unavailableReason: string | null = null;
     if (asset.storage_path) {
       const { data: file } = await supabase.storage
         .from(asset.storage_bucket ?? 'generated-assets')
         .download(asset.storage_path);
       if (file) {
-        const base64 = Buffer.from(await file.arrayBuffer()).toString('base64');
-        dataUrl = `data:${file.type || 'image/png'};base64,${base64}`;
+        const contenuto = Buffer.from(await file.arrayBuffer());
+        dataUrl = rasterDataUrlSicuro(contenuto);
+        if (!dataUrl) {
+          unavailableReason = 'IMMAGINE NON INCORPORATA — il PDF supporta asset PNG e JPEG validi';
+        }
       }
     }
 
@@ -188,9 +231,36 @@ async function raccogliFigure(
       altText: asset.alt_text,
       dataUrl,
       mermaidSource: asset.mermaid_source,
+      unavailableReason,
     });
     perCapitolo.set(asset.chapter_id, elenco);
   }
 
   return perCapitolo;
+}
+
+/** Non fidarsi del MIME dichiarato: Storage può restituire SVG/WebP come PNG. */
+export function rasterDataUrlSicuro(bytes: Uint8Array): string | null {
+  const png =
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a;
+  const jpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (!png && !jpeg) return null;
+  return `data:${png ? 'image/png' : 'image/jpeg'};base64,${Buffer.from(bytes).toString('base64')}`;
+}
+
+function isErroreGraficoPdf(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /unsupported number|invalid image|unsupported image|image data|png|jpe?g/i.test(message);
+}
+
+function normalizzaMarkdownPdf(markdown: string): string {
+  return markdown.replace(/\S{72,}/g, (token) => token.match(/.{1,48}/g)?.join('\u200b') ?? token);
 }

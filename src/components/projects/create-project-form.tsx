@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import { Alert } from '@/components/ui/alert';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -57,6 +57,7 @@ function SceltaEditoriale<T extends string>({
 
 export function CreateProjectForm() {
   const [state, formAction] = useActionState(createProject, initialActionState);
+  const [workShape, setWorkShape] = useState('volume_singolo');
 
   return (
     <form action={formAction} className="max-w-2xl space-y-5" noValidate>
@@ -96,29 +97,23 @@ export function CreateProjectForm() {
           )}
         </Field>
 
-        <Field id="volume" label="Volume" hint="Ad esempio: Volume 1" error={state.fieldErrors?.volume}>
-          {({ id, describedBy }) => <Input id={id} name="volume" aria-describedby={describedBy} />}
+        <Field id="language" label="Lingua" hint="Codice di due lettere: it, en, es…" error={state.fieldErrors?.language}>
+          {({ id, describedBy }) => <Input id={id} name="language" defaultValue="it" maxLength={2} aria-describedby={describedBy} invalid={Boolean(state.fieldErrors?.language)} />}
         </Field>
       </div>
 
-      <Field
-        id="language"
-        label="Lingua"
-        hint="Codice di due lettere: it, en, es…"
-        error={state.fieldErrors?.language}
-      >
-        {({ id, describedBy }) => (
-          <Input
-            id={id}
-            name="language"
-            defaultValue="it"
-            maxLength={2}
-            className="w-24"
-            aria-describedby={describedBy}
-            invalid={Boolean(state.fieldErrors?.language)}
-          />
-        )}
-      </Field>
+      <fieldset className="space-y-5 rounded-lg border border-border-subtle p-4">
+        <legend className="px-1 text-sm font-medium text-foreground">Configurazioni globali</legend>
+        <p className="text-xs text-muted-foreground">Queste impostazioni definiscono la pubblicazione nel suo insieme e si applicano a tutti i manuali.</p>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field id="workShape" label="Forma dell’opera" hint={FORME.map((voce) => `${voce.label}: ${voce.hint}`).join(' · ')} error={state.fieldErrors?.workShape}>
+            {({ id, describedBy }) => <select id={id} name="workShape" value={workShape} onChange={(event) => setWorkShape(event.target.value)} aria-describedby={describedBy} className={CLASSE_SELECT}>{FORME.map((voce) => <option key={voce.value} value={voce.value}>{voce.label} — {voce.hint}</option>)}</select>}
+          </Field>
+          {workShape === 'collana' ? <Field id="volumeCount" label="Numero di volumi" hint="Crea le configurazioni iniziali; potrai aggiungerne altri." error={state.fieldErrors?.volumeCount}>
+            {({ id, describedBy }) => <Input id={id} name="volumeCount" type="number" min={1} max={20} defaultValue={3} aria-describedby={describedBy} />}
+          </Field> : <input type="hidden" name="volumeCount" value="1" />}
+        </div>
+      </fieldset>
 
       <fieldset className="space-y-5 rounded-lg border border-border-subtle p-4">
         <legend className="px-1 text-sm font-medium text-foreground">Che opera è</legend>
@@ -129,29 +124,6 @@ export function CreateProjectForm() {
         </p>
 
         <div className="grid gap-5 sm:grid-cols-2">
-          <Field
-            id="workShape"
-            label="Forma dell’opera"
-            hint={FORME.map((voce) => `${voce.label}: ${voce.hint}`).join(' · ')}
-            error={state.fieldErrors?.workShape}
-          >
-            {({ id, describedBy }) => (
-              <select
-                id={id}
-                name="workShape"
-                defaultValue="volume_singolo"
-                aria-describedby={describedBy}
-                className={CLASSE_SELECT}
-              >
-                {FORME.map((voce) => (
-                  <option key={voce.value} value={voce.value}>
-                    {voce.label} — {voce.hint}
-                  </option>
-                ))}
-              </select>
-            )}
-          </Field>
-
           <Field
             id="targetPages"
             label="Pagine obiettivo"

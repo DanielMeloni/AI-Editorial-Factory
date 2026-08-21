@@ -6,7 +6,29 @@ import type {
   ProjectRow,
   ProjectSourceRow,
   PublicationPartRow,
+  ProjectVolumeRow,
 } from '@/lib/db/types';
+
+export async function listProjectVolumes(projectId: string): Promise<ProjectVolumeRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('project_volumes')
+    .select('*')
+    .eq('project_id', projectId)
+    .order('volume_number')
+    .returns<ProjectVolumeRow[]>();
+  if (error && /project_volumes|schema cache|does not exist/i.test(error.message)) return [];
+  if (error) throw new Error(`Lettura dei volumi fallita: ${error.message}`);
+  return data ?? [];
+}
+
+export async function getProjectVolume(projectId: string, volumeId: string): Promise<ProjectVolumeRow | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from('project_volumes').select('*')
+    .eq('project_id', projectId).eq('id', volumeId).maybeSingle<ProjectVolumeRow>();
+  if (error) throw new Error(`Lettura del volume fallita: ${error.message}`);
+  return data;
+}
 
 /**
  * Letture. Ogni query è comunque protetta dalla RLS: anche se un filtro

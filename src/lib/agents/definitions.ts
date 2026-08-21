@@ -618,6 +618,12 @@ export const sourceDiscoveryAgent: AgentDefinition<SourceDiscoveryInput, SourceD
           `    dominio: ${candidate.domain}${candidate.isOfficial ? ' (ufficiale)' : candidate.isCommunity ? ' (comunità)' : ''}\n` +
           (candidate.excerpt ? `    estratto: ${candidate.excerpt.slice(0, 300)}\n` : ''),
       ),
+      '',
+      'Formato obbligatorio della risposta:',
+      '- `selected` è sempre un array JSON (anche quando è vuoto), massimo 40 elementi.',
+      '- `discarded` è sempre un array JSON (anche quando è vuoto), massimo 60 elementi.',
+      '- Non sostituire mai gli array con testo, elenchi Markdown o valori separati da virgole.',
+      '- Ogni pagina ricevuta deve comparire una sola volta: in `selected` oppure in `discarded`.',
     ].join('\n'),
 
   /**
@@ -725,6 +731,14 @@ export const chapterPlanAgent: AgentDefinition<ChapterDraftInput, ChapterPlanOut
       '',
       input.direzione,
       '',
+      'Posizione nel flusso globale del manuale:',
+      ...input.manualOutline.map((title) => `- ${title}`),
+      input.previousChapters.length ? '' : '',
+      ...(input.previousChapters.length ? [
+        'Capitoli precedenti già approvati — dai questi contenuti per acquisiti e non ripeterli:',
+        ...input.previousChapters.map((item) => `- ${item.title}: ${item.summary}`),
+      ] : []),
+      '',
       'Estratti disponibili:',
       input.evidence || '(nessun estratto disponibile)',
       '',
@@ -808,6 +822,7 @@ export const chapterSectionAgent: AgentDefinition<ChapterSectionInput, ChapterSe
       input.evidence || '(nessun estratto disponibile)',
       '',
       `Restituisci la sola sezione, aperta dal titolo «## ${input.number ?? ''}.${input.sectionNumber} ${input.sectionTitle}».`,
+      'Ogni elemento di `gaps` deve essere una frase sintetica di massimo 300 caratteri.',
     ]
       .filter(Boolean)
       .join('\n'),
@@ -863,6 +878,8 @@ export const chapterApparatusAgent: AgentDefinition<
       '',
       'Capitolo scritto:',
       input.body.slice(0, 60_000),
+      '',
+      'Ogni elemento di `gaps` deve essere una frase sintetica di massimo 300 caratteri.',
     ]
       .filter(Boolean)
       .join('\n'),

@@ -14,6 +14,7 @@ import {
   proposeRevision,
   requestApproval,
   updateVolumePreview,
+  startNextGlobalChapter,
   verifyTechnical,
   type RunContext,
 } from './chapter-audit-steps';
@@ -48,6 +49,7 @@ const TOTAL_STEPS = 14;
 export interface ChapterAuditInput extends RunContext {
   /** Token opaco con cui riprendere l'esecuzione dopo la decisione umana. */
   resumeToken: string;
+  globalSequence?: boolean;
 }
 
 export async function chapterAuditWorkflow(input: ChapterAuditInput) {
@@ -132,6 +134,11 @@ export async function chapterAuditWorkflow(input: ChapterAuditInput) {
           ? ` ${stesura.gaps.length} punti che le fonti non coprono: ${stesura.gaps.slice(0, 3).join('; ')}`
           : ''),
     );
+
+    // La coda avanza quando il capitolo è pronto per la revisione, non quando
+    // la persona ha finito di revisionarlo. Così la generazione resta
+    // sequenziale, mentre revisione umana e generazione possono sovrapporsi.
+    if (input.globalSequence) await startNextGlobalChapter(context);
 
     // --- Sospensione: si riprende solo con una decisione umana. -------------
     // Va segnalata come passaggio: per chi guarda, «in attesa» è

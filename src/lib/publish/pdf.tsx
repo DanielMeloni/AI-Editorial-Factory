@@ -1,15 +1,7 @@
 import 'server-only';
 
 import * as React from 'react';
-import {
-  Document,
-  Image,
-  Page,
-  Text,
-  View,
-  StyleSheet,
-  renderToBuffer,
-} from '@react-pdf/renderer';
+import { Document, Image, Page, Text, View, StyleSheet, renderToBuffer } from '@react-pdf/renderer';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
@@ -48,7 +40,13 @@ const styles = StyleSheet.create({
     color: colori.testo,
     fontFamily: 'Times-Roman',
   },
-  eyebrow: { fontSize: 8, color: colori.tenue, letterSpacing: 1, marginBottom: 6, fontFamily: 'Helvetica' },
+  eyebrow: {
+    fontSize: 8,
+    color: colori.tenue,
+    letterSpacing: 1,
+    marginBottom: 6,
+    fontFamily: 'Helvetica',
+  },
   titolo: { fontSize: 22, fontFamily: 'Times-Bold', marginBottom: 8, lineHeight: 1.25 },
   metaTesta: { fontSize: 9, color: colori.tenue, marginBottom: 20, fontFamily: 'Helvetica' },
   h1: { fontSize: 17, fontFamily: 'Times-Bold', marginTop: 20, marginBottom: 8 },
@@ -65,8 +63,20 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   codiceRiga: { fontFamily: 'Courier', fontSize: 8.5, lineHeight: 1.45 },
-  codiceLingua: { fontFamily: 'Helvetica', fontSize: 7, color: colori.tenue, marginBottom: 4, letterSpacing: 0.5 },
-  citazione: { borderLeftWidth: 2, borderLeftColor: colori.bordo, paddingLeft: 10, marginBottom: 10, color: colori.tenue },
+  codiceLingua: {
+    fontFamily: 'Helvetica',
+    fontSize: 7,
+    color: colori.tenue,
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  citazione: {
+    borderLeftWidth: 2,
+    borderLeftColor: colori.bordo,
+    paddingLeft: 10,
+    marginBottom: 10,
+    color: colori.tenue,
+  },
   vocElenco: { flexDirection: 'row', marginBottom: 4 },
   segno: { width: 16, color: colori.tenue },
   vocTesto: { flex: 1 },
@@ -79,7 +89,13 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     alignItems: 'center',
   },
-  didascalia: { fontSize: 8.5, color: colori.tenue, fontFamily: 'Helvetica', marginTop: 5, textAlign: 'center' },
+  didascalia: {
+    fontSize: 8.5,
+    color: colori.tenue,
+    fontFamily: 'Helvetica',
+    marginTop: 5,
+    textAlign: 'center',
+  },
   separatore: { borderBottomWidth: 0.5, borderBottomColor: colori.bordo, marginVertical: 14 },
   tabellaRiga: { flexDirection: 'row', borderBottomWidth: 0.5, borderBottomColor: colori.bordo },
   tabellaCella: { flex: 1, padding: 5, fontSize: 9 },
@@ -107,7 +123,7 @@ function renderInline(nodes: PhrasingContent[], keyPrefix: string): React.ReactN
 
     switch (node.type) {
       case 'text':
-        return <Text key={key}>{node.value}</Text>;
+        return <Text key={key}>{testoInterrompibile(node.value)}</Text>;
       case 'strong':
         return (
           <Text key={key} style={{ fontFamily: 'Times-Bold' }}>
@@ -123,7 +139,7 @@ function renderInline(nodes: PhrasingContent[], keyPrefix: string): React.ReactN
       case 'inlineCode':
         return (
           <Text key={key} style={{ fontFamily: 'Courier', fontSize: 9 }}>
-            {node.value}
+            {testoInterrompibile(node.value)}
           </Text>
         );
       case 'link':
@@ -132,7 +148,11 @@ function renderInline(nodes: PhrasingContent[], keyPrefix: string): React.ReactN
         return (
           <Text key={key}>
             <Text style={{ color: colori.accento }}>{renderInline(node.children, key)}</Text>
-            <Text style={{ fontSize: 8, color: colori.tenue }}> ({node.url})</Text>
+            <Text style={{ fontSize: 8, color: colori.tenue }}>
+              {' ('}
+              {testoInterrompibile(node.url)}
+              {')'}
+            </Text>
           </Text>
         );
       case 'delete':
@@ -155,6 +175,11 @@ function renderInline(nodes: PhrasingContent[], keyPrefix: string): React.ReactN
   });
 }
 
+/** Impedisce a URL, hash e identificatori molto lunghi di mandare Yoga fuori scala. */
+function testoInterrompibile(value: string): string {
+  return value.replace(/\S{72,}/g, (token) => token.match(/.{1,48}/g)?.join('\u200b') ?? token);
+}
+
 const STILI_TITOLO = [styles.h1, styles.h1, styles.h2, styles.h3, styles.h4, styles.h4, styles.h4];
 
 function renderBlock(node: RootContent, key: string): React.ReactNode {
@@ -169,9 +194,7 @@ function renderBlock(node: RootContent, key: string): React.ReactNode {
     case 'paragraph': {
       // Un paragrafo con la sola immagine diventa una figura con didascalia.
       const soloImmagine =
-        node.children.length === 1 && node.children[0]?.type === 'image'
-          ? node.children[0]
-          : null;
+        node.children.length === 1 && node.children[0]?.type === 'image' ? node.children[0] : null;
 
       if (soloImmagine && soloImmagine.type === 'image') {
         return (
@@ -193,11 +216,11 @@ function renderBlock(node: RootContent, key: string): React.ReactNode {
 
     case 'code':
       return (
-        <View key={key} style={styles.codiceBlocco} wrap={false}>
+        <View key={key} style={styles.codiceBlocco}>
           {node.lang ? <Text style={styles.codiceLingua}>{node.lang.toUpperCase()}</Text> : null}
           {node.value.split('\n').map((riga, index) => (
             <Text key={`${key}-r${index}`} style={styles.codiceRiga}>
-              {riga || ' '}
+              {testoInterrompibile(riga || ' ')}
             </Text>
           ))}
         </View>
@@ -215,7 +238,9 @@ function renderBlock(node: RootContent, key: string): React.ReactNode {
         <View key={key} style={{ marginBottom: 9 }}>
           {node.children.map((item, index) => (
             <View key={`${key}-i${index}`} style={styles.vocElenco}>
-              <Text style={styles.segno}>{node.ordered ? `${(node.start ?? 1) + index}.` : '•'}</Text>
+              <Text style={styles.segno}>
+                {node.ordered ? `${(node.start ?? 1) + index}.` : '•'}
+              </Text>
               <View style={styles.vocTesto}>
                 {item.children.map((child, childIndex) =>
                   renderBlock(child, `${key}-i${index}-${childIndex}`),
@@ -232,8 +257,11 @@ function renderBlock(node: RootContent, key: string): React.ReactNode {
           {node.children.map((riga, rigaIndex) => (
             <View
               key={`${key}-r${rigaIndex}`}
-              style={rigaIndex === 0 ? [styles.tabellaRiga, styles.tabellaIntestazione] : styles.tabellaRiga}
-              wrap={false}
+              style={
+                rigaIndex === 0
+                  ? [styles.tabellaRiga, styles.tabellaIntestazione]
+                  : styles.tabellaRiga
+              }
             >
               {riga.children.map((cella, cellaIndex) => (
                 <Text key={`${key}-r${rigaIndex}-c${cellaIndex}`} style={styles.tabellaCella}>
@@ -342,6 +370,8 @@ export interface VolumeFigure {
   altText: string | null;
   dataUrl: string | null;
   mermaidSource: string | null;
+  /** Motivo per cui un asset non può essere incorporato nel PDF. */
+  unavailableReason?: string | null;
 }
 
 export interface VolumeMeta {
@@ -370,16 +400,24 @@ export interface VolumeMeta {
 /** Le figure del capitolo, in coda al testo. */
 function renderFigure(figure: VolumeFigure, key: string): React.ReactNode {
   return (
-    <View key={key} style={{ marginBottom: 12 }} wrap={false}>
+    <View key={key} style={{ marginBottom: 12 }}>
       {figure.dataUrl ? (
-        <Image src={figure.dataUrl} style={{ marginBottom: 4, objectFit: 'contain' }} />
+        // Dimensioni imposte: non propagare nel layout eventuali misure DPI
+        // assurde contenute nei metadati del file.
+        // eslint-disable-next-line jsx-a11y/alt-text
+        <Image
+          src={figure.dataUrl}
+          style={{ width: '100%', maxHeight: 420, marginBottom: 4, objectFit: 'contain' }}
+        />
       ) : (
         <View style={styles.figura}>
           <Text style={{ fontSize: 8, color: colori.tenue, marginBottom: 4 }}>
-            DIAGRAMMA — la resa grafica si vede nell’applicazione
+            {figure.unavailableReason ?? 'DIAGRAMMA — la resa grafica si vede nell’applicazione'}
           </Text>
           {figure.mermaidSource ? (
-            <Text style={styles.codiceRiga}>{figure.mermaidSource.trim()}</Text>
+            <Text style={styles.codiceRiga}>
+              {testoInterrompibile(figure.mermaidSource.trim())}
+            </Text>
           ) : null}
         </View>
       )}
@@ -427,7 +465,9 @@ export async function exportVolumePdf(
           <Text style={{ fontSize: 9, color: colori.tenue, fontFamily: 'Helvetica' }}>
             Composta il {meta.generatedAt} · {chapters.length}{' '}
             {chapters.length === 1 ? 'capitolo' : 'capitoli'}
-            {meta.drafts > 0 ? ` · ${meta.drafts} in bozza, marcati come tali` : ' · tutti approvati'}
+            {meta.drafts > 0
+              ? ` · ${meta.drafts} in bozza, marcati come tali`
+              : ' · tutti approvati'}
             {meta.pending > 0 ? ` · ${meta.pending} non ancora scritti` : ''}
           </Text>
         </View>
@@ -457,10 +497,7 @@ export async function exportVolumePdf(
 
       {/* Capitoli */}
       {chapters.map((capitolo, indice) => {
-        const albero = unified()
-          .use(remarkParse)
-          .use(remarkGfm)
-          .parse(capitolo.contentMd) as Root;
+        const albero = unified().use(remarkParse).use(remarkGfm).parse(capitolo.contentMd) as Root;
 
         return (
           <Page key={`cap-${indice}`} size="A4" style={styles.page}>
@@ -498,8 +535,8 @@ export async function exportVolumePdf(
         <Page size="A4" style={styles.page}>
           <Text style={styles.titolo}>Nessun capitolo scritto</Text>
           <Text style={styles.paragrafo}>
-            L’anteprima raccoglie tutto ciò che è stato scritto, approvato o no. Avvia l’audit su
-            un capitolo e comparirà qui.
+            L’anteprima raccoglie tutto ciò che è stato scritto, approvato o no. Avvia l’audit su un
+            capitolo e comparirà qui.
           </Text>
         </Page>
       ) : null}
@@ -508,4 +545,74 @@ export async function exportVolumePdf(
 
   const buffer = await renderToBuffer(documento);
   return new Uint8Array(buffer);
+}
+
+/**
+ * Renderer di ultima istanza, intenzionalmente privo di Yoga complesso.
+ * Conserva l'intero testo dividendolo in pagine di dimensione prevedibile.
+ */
+export async function exportVolumePdfLineare(
+  chapters: VolumeChapterInput[],
+  meta: VolumeMeta,
+): Promise<Uint8Array> {
+  const pagine = chapters.flatMap((capitolo) => {
+    const testo = pulisciTestoPdf(capitolo.contentMd);
+    const parti = dividiTestoPdf(testo);
+    return (parti.length > 0 ? parti : ['']).map((parte, indice) => ({
+      chapter: capitolo,
+      content: parte,
+      part: indice + 1,
+      total: Math.max(parti.length, 1),
+    }));
+  });
+
+  const documento = (
+    <Document
+      title={pulisciTestoPdf(meta.projectTitle)}
+      author={pulisciTestoPdf(meta.author)}
+      creator="AI Editorial Factory"
+    >
+      <Page size="A4" style={{ padding: 56, fontFamily: 'Times-Roman', fontSize: 10 }}>
+        <Text style={{ fontFamily: 'Times-Bold', fontSize: 26, marginTop: 120, marginBottom: 14 }}>
+          {pulisciTestoPdf(meta.projectTitle)}
+        </Text>
+        {meta.subtitle ? (
+          <Text style={{ fontSize: 14 }}>{pulisciTestoPdf(meta.subtitle)}</Text>
+        ) : null}
+        <Text style={{ marginTop: 18 }}>{pulisciTestoPdf(meta.author)}</Text>
+        <Text style={{ marginTop: 28, fontSize: 9 }}>
+          Anteprima lineare di sicurezza · {chapters.length} capitoli
+        </Text>
+      </Page>
+
+      {pagine.map(({ chapter, content, part, total }, indice) => (
+        <Page
+          key={`safe-${indice}`}
+          size="A4"
+          style={{ padding: 48, fontFamily: 'Times-Roman', fontSize: 9.5 }}
+        >
+          <Text style={{ fontFamily: 'Times-Bold', fontSize: 15, marginBottom: 12 }}>
+            {pulisciTestoPdf(`${chapter.label} — ${chapter.title}`)}
+            {total > 1 ? ` · parte ${part}/${total}` : ''}
+          </Text>
+          <Text>{content}</Text>
+        </Page>
+      ))}
+    </Document>
+  );
+
+  const buffer = await renderToBuffer(documento);
+  return new Uint8Array(buffer);
+}
+
+function pulisciTestoPdf(value: string): string {
+  return testoInterrompibile(value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ''));
+}
+
+function dividiTestoPdf(value: string, max = 6000): string[] {
+  const parti: string[] = [];
+  for (let inizio = 0; inizio < value.length; inizio += max) {
+    parti.push(value.slice(inizio, inizio + max));
+  }
+  return parti;
 }

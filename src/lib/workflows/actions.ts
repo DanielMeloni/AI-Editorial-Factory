@@ -12,6 +12,7 @@ import { checkRateLimit } from '@/lib/security/rate-limit';
 import { getServerEnv } from '@/lib/env';
 import { chapterAuditWorkflow } from '@/workflows/chapter-audit';
 import { approvalHook } from '@/workflows/hooks';
+import { rebuildVolumePreviewWith } from '@/lib/publish/preview';
 
 /**
  * Comandi sui workflow: avvio, annullamento, ritentativo, decisione.
@@ -28,7 +29,7 @@ export interface CommandResult {
 
 const CHAPTER_AUDIT = 'chapter-audit';
 
-export async function startChapterAudit(chapterId: string): Promise<CommandResult> {
+export async function startChapterAudit(chapterId: string, globalSequence = false): Promise<CommandResult> {
   const user = await requireUser();
   const organization = await requireOrganization();
   const supabase = await createClient();
@@ -87,7 +88,7 @@ export async function startChapterAudit(chapterId: string): Promise<CommandResul
       kind: CHAPTER_AUDIT,
       status: 'queued',
       total_steps: 13,
-      input: { chapterTitle: chapter.title, resumeToken },
+      input: { chapterTitle: chapter.title, resumeToken, globalSequence },
       started_by: user.id,
       started_at: new Date().toISOString(),
     })
@@ -107,6 +108,7 @@ export async function startChapterAudit(chapterId: string): Promise<CommandResul
         chapterId,
         actorId: user.id,
         resumeToken,
+        globalSequence,
       },
     ]);
 
@@ -140,6 +142,35 @@ export async function startChapterAudit(chapterId: string): Promise<CommandResul
 
   revalidatePath(`/projects/${chapter.project_id}/workflows`);
   return { ok: true, message: 'Audit avviato.', workflowRunId: run.id };
+}
+
+/** Avvia la coda globale: un solo capitolo, il successivo parte dopo l'approvazione. */
+export async function startProjectAudit(projectId: string): Promise<CommandResult> {
+  await requireUser();
+  const organization = await requireOrganization();
+  const supabase = await createClient();
+  const { data: active } = await supabase.from('workflow_runs').select('id')
+    .eq('project_id', projectId).in('status', ['queued', 'running', 'awaiting_approval']).limit(1);
+  if ((active?.length ?? 0) > 0) {
+    return { ok: false, message: 'Termina o revisiona il capitolo già in corso prima di avviare la sequenza.' };
+  }
+  const { data: chapters, error } = await supabase.from('chapters')
+    .select('id, organization_id').eq('project_id', projectId).eq('status', 'draft')
+    .order('order_index').returns<{ id: string; organization_id: string }[]>();
+  if (error) return { ok: false, message: `Lettura dei capitoli fallita: ${error.message}` };
+  const authorized = (chapters ?? []).filter((chapter) => chapter.organization_id === organization.id);
+  if (authorized.length === 0) return { ok: false, message: 'Non ci sono capitoli in bozza da elaborare.' };
+
+  const result = await startChapterAudit(authorized[0]!.id, true);
+  revalidatePath(`/projects/${projectId}/structure`);
+  revalidatePath(`/projects/${projectId}/workflows`);
+  return {
+    ok: result.ok,
+    workflowRunId: result.workflowRunId,
+    message: result.ok
+      ? `Sequenza avviata dal primo di ${authorized.length} capitoli. Il successivo partirà soltanto dopo l’approvazione del corrente.`
+      : result.message,
+  };
 }
 
 /**
@@ -234,11 +265,11 @@ export async function decideReview(
 
   const { data: request } = await supabase
     .from('review_requests')
-    .select('id, status, resume_token, project_id, organization_id, workflow_run_id')
+    .select('id, status, resume_token, project_id, chapter_id, organization_id, workflow_run_id')
     .eq('id', reviewRequestId)
     .maybeSingle<{
       id: string; status: string; resume_token: string | null;
-      project_id: string; organization_id: string; workflow_run_id: string | null;
+      project_id: string; chapter_id: string; organization_id: string; workflow_run_id: string | null;
     }>();
 
   if (!request || request.organization_id !== organization.id) {
@@ -252,6 +283,7 @@ export async function decideReview(
   if (!request.resume_token) {
     return { ok: false, message: 'Token di ripresa mancante: il workflow non può essere ripreso.' };
   }
+
 
   // Il motore dei workflow è l'unica strada normale, ma non è l'unica possibile.
   // Se l'esecuzione non è più sospesa — è fallita, è stata annullata, oppure il
@@ -309,6 +341,7 @@ export async function decideReview(
     metadata: { workflowRunId: request.workflow_run_id },
   });
 
+
   revalidatePath(`/projects/${request.project_id}/reviews`);
   revalidatePath(`/projects/${request.project_id}/workflows`);
 
@@ -351,10 +384,10 @@ async function applicaDecisioneSenzaWorkflow(
 
   const { data: request } = await supabase
     .from('review_requests')
-    .select('id, chapter_id, proposed_version_id, organization_id')
+    .select('id, project_id, chapter_id, proposed_version_id, organization_id')
     .eq('id', reviewRequestId)
     .maybeSingle<{
-      id: string; chapter_id: string; proposed_version_id: string | null; organization_id: string;
+      id: string; project_id: string; chapter_id: string; proposed_version_id: string | null; organization_id: string;
     }>();
 
   if (!request || request.organization_id !== organizationId) {
@@ -382,6 +415,12 @@ async function applicaDecisioneSenzaWorkflow(
     .from('chapters')
     .update({ current_version_id: request.proposed_version_id, status: 'approved' })
     .eq('id', request.chapter_id);
+
+  await rebuildVolumePreviewWith(createAdminClient(), {
+    projectId: request.project_id,
+    organizationId,
+    actorId: decidedBy,
+  });
 
   return { ok: true, message: 'Decisione applicata.' };
 }

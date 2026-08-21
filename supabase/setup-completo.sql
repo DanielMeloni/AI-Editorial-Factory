@@ -2880,6 +2880,62 @@ end;
 $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════
+-- ▶ 20260818120001_project_brief.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ---------------------------------------------------------------------------
+-- Brief del progetto: forma dell'opera, dimensione, ambito
+-- ---------------------------------------------------------------------------
+--
+-- La direzione editoriale dice **come** si scrive; il brief dice **che cosa si
+-- sta costruendo**. Senza, il Curriculum Agent conosce il titolo e le fonti e
+-- deve indovinare il resto: una guida rapida di cento pagine e il primo volume
+-- di una collana partono dallo stesso materiale e producono indici opposti.
+--
+-- «Fuori ambito» esiste per una ragione precisa: dire cosa un'opera non tratta
+-- è spesso più efficace che elencare cosa tratta, e su un manuale tecnico è
+-- l'unico modo per impedire che l'indice si allarghi fino a diventare
+-- inutilizzabile.
+--
+-- Migrazione riscrivibile: in questo progetto capita di applicarla incollandola
+-- nell'editor SQL.
+
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'work_shape') then
+    create type work_shape as enum ('volume_singolo', 'collana', 'guida_rapida');
+  end if;
+end;
+$$;
+
+alter table public.projects
+  add column if not exists work_shape   work_shape not null default 'volume_singolo',
+  -- Nullo significa «nessun vincolo di lunghezza», non «zero pagine».
+  add column if not exists target_pages integer,
+  add column if not exists scope        text,
+  add column if not exists out_of_scope text,
+  add column if not exists audience     text;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'projects_target_pages_range') then
+    alter table public.projects
+      add constraint projects_target_pages_range
+        check (target_pages is null or target_pages between 8 and 2000);
+  end if;
+
+  if not exists (select 1 from pg_constraint where conname = 'projects_brief_length') then
+    alter table public.projects
+      add constraint projects_brief_length check (
+        (scope is null or char_length(scope) <= 3000)
+        and (out_of_scope is null or char_length(out_of_scope) <= 2000)
+        and (audience is null or char_length(audience) <= 1000)
+      );
+  end if;
+end;
+$$;
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- ▶ 20260819100001_blog_courses_rls.sql
 -- ═══════════════════════════════════════════════════════════════════════════
 
@@ -2967,3 +3023,79 @@ create index if not exists courses_org_idx on public.courses (organization_id);
 
 create index if not exists course_lessons_project_idx on public.course_lessons (project_id);
 create index if not exists course_lessons_org_idx on public.course_lessons (organization_id);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ▶ 20260819160001_tool_logo.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ---------------------------------------------------------------------------
+-- Logo dello strumento oggetto del progetto
+--
+-- Il logo si carica in fase di input, accanto alle fonti: è il primo dato
+-- visivo del progetto e serve alla copertina e alle anteprime dei corsi.
+--
+-- Non è un riferimento visuale come gli altri — quelli dicono «questo è il
+-- registro», questo dice «questo è lo strumento» — e va composto tale e quale,
+-- non ridisegnato. Distinguerlo con un valore proprio evita di doverlo
+-- riconoscere dal nome del file, che è un modo per sbagliare.
+-- ---------------------------------------------------------------------------
+
+alter type asset_kind add value if not exists 'logo';
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ▶ 20260820120001_project_volumes.sql
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Configurazioni dei manuali contenuti in un unico progetto/collana.
+create table if not exists public.project_volumes (
+  id              uuid primary key default gen_random_uuid(),
+  project_id      uuid not null references public.projects (id) on delete cascade,
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  volume_number   integer not null,
+  title           text not null,
+  subtitle        text,
+  level           editorial_level not null default 'base',
+  audience        text,
+  scope           text,
+  out_of_scope    text,
+  target_pages    integer,
+  status          project_status not null default 'draft',
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  unique (project_id, volume_number),
+  constraint project_volumes_number_positive check (volume_number > 0),
+  constraint project_volumes_pages_range check (target_pages is null or target_pages between 8 and 2000),
+  constraint project_volumes_title_length check (char_length(title) between 1 and 200)
+);
+
+create trigger project_volumes_set_updated_at
+  before update on public.project_volumes
+  for each row execute function public.set_updated_at();
+
+alter table public.project_volumes enable row level security;
+alter table public.project_volumes force row level security;
+
+create policy project_volumes_select_member on public.project_volumes
+  for select to authenticated using (public.is_org_member(organization_id));
+create policy project_volumes_insert_member on public.project_volumes
+  for insert to authenticated with check (public.is_org_member(organization_id));
+create policy project_volumes_update_member on public.project_volumes
+  for update to authenticated using (public.is_org_member(organization_id))
+  with check (public.is_org_member(organization_id));
+create policy project_volumes_delete_member on public.project_volumes
+  for delete to authenticated using (public.is_org_member(organization_id));
+
+create index project_volumes_project_idx on public.project_volumes (project_id, volume_number);
+create index project_volumes_org_idx on public.project_volumes (organization_id);
+
+-- Ogni progetto esistente parte con una configurazione, senza perdere dati.
+insert into public.project_volumes (
+  project_id, organization_id, volume_number, title, subtitle, level,
+  audience, scope, out_of_scope, target_pages, status
+)
+select id, organization_id, 1, title, subtitle, level,
+       audience, scope, out_of_scope, target_pages, status
+  from public.projects
+on conflict (project_id, volume_number) do nothing;
+
+notify pgrst, 'reload schema';

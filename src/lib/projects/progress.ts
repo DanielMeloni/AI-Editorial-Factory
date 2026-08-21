@@ -139,6 +139,16 @@ export async function getProjectProgress(projectId: string): Promise<ProgressoPr
       fatta: (anteprima.count ?? 0) > 0 && approvati > 0,
       dettaglio: approvati > 0 ? `${approvati} capitoli nel volume` : null,
     },
+    {
+      key: 'distribuzione',
+      label: 'Blog, corsi e pubblicazioni',
+      azione: 'Trasforma il manuale approvato in articoli, corsi e formati di pubblicazione',
+      href: `${base}/exports`,
+      // Lo step diventa disponibile quando esiste almeno un'anteprima pronta;
+      // i suoi tre canali restano attività indipendenti e reiterabili.
+      fatta: (anteprima.count ?? 0) > 0 && approvati > 0,
+      dettaglio: '3 canali di uscita',
+    },
   ];
 
   return {
@@ -166,6 +176,9 @@ const SCHEDA_PER_FASE: Record<string, string> = {
   reviews: 'revisioni',
   'cover-studio': 'copertina',
   preview: 'anteprima',
+  blog: 'distribuzione',
+  courses: 'distribuzione',
+  exports: 'distribuzione',
 };
 
 export function statiSchede(progresso: ProgressoProgetto): Record<string, StatoScheda> {

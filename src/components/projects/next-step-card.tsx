@@ -17,8 +17,9 @@ import type { ProgressoProgetto } from '@/lib/projects/progress';
  * Ogni fase è raggiungibile sia dal settore sia dalla riga: il disegno è un
  * modo di navigare, non un'illustrazione da guardare.
  */
-export function NextStepCard({ progresso }: { progresso: ProgressoProgetto }) {
+export function NextStepCard({ progresso, volumeId }: { progresso: ProgressoProgetto; volumeId?: string }) {
   const { prossima, fasi, completate } = progresso;
+  const hrefConVolume = (href: string) => volumeId ? `${href}?volume=${volumeId}` : href;
 
   return (
     <Card className={cn(prossima ? 'border-warning/40' : 'border-success/40')}>
@@ -36,7 +37,7 @@ export function NextStepCard({ progresso }: { progresso: ProgressoProgetto }) {
                 : 'Ogni fase è conclusa: il volume è pronto da pubblicare.'}
             </p>
             <Link
-              href={prossima ? prossima.href : fasi[fasi.length - 1]!.href}
+              href={hrefConVolume(prossima ? prossima.href : fasi[fasi.length - 1]!.href)}
               className={cn(buttonVariants({ variant: 'primary', size: 'sm' }), 'mt-2')}
             >
               {prossima ? `Vai a ${prossima.label}` : 'Apri l’anteprima'}
@@ -50,7 +51,7 @@ export function NextStepCard({ progresso }: { progresso: ProgressoProgetto }) {
               return (
                 <li key={fase.key}>
                   <Link
-                    href={fase.href}
+                    href={hrefConVolume(fase.href)}
                     aria-current={corrente ? 'step' : undefined}
                     className={cn(
                       'flex items-center gap-3 px-1 py-2 text-sm transition-colors hover:bg-surface-muted',

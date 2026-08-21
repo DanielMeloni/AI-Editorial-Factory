@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { Topbar } from '@/components/layout/topbar';
 import { ProjectTabs } from '@/components/projects/project-tabs';
 import { requireUser } from '@/lib/auth/guards';
-import { getProject } from '@/lib/projects/queries';
+import { getProject, listProjectVolumes } from '@/lib/projects/queries';
 import { getProjectProgress, statiSchede } from '@/lib/projects/progress';
 
 export default async function ProjectLayout({
@@ -23,7 +23,10 @@ export default async function ProjectLayout({
 
   // Lo stato delle tappe accompagna la navigazione: la barra dice a che punto
   // è il lavoro anche quando si sta guardando tutt'altro.
-  const progresso = await getProjectProgress(projectId);
+  const [progresso, volumes] = await Promise.all([
+    getProjectProgress(projectId),
+    listProjectVolumes(projectId),
+  ]);
 
   return (
     <>
@@ -32,7 +35,7 @@ export default async function ProjectLayout({
         crumbs={[{ label: 'Progetti', href: '/projects' }, { label: project.title }]}
       />
       <div className="border-b border-border-subtle bg-surface px-4 sm:px-6">
-        <ProjectTabs projectId={projectId} stati={statiSchede(progresso)} />
+        <ProjectTabs projectId={projectId} stati={statiSchede(progresso)} volumes={volumes} />
       </div>
       {children}
     </>
