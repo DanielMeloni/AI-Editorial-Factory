@@ -53,32 +53,64 @@ export interface RunContext {
 export async function startNextGlobalChapter(context: RunContext): Promise<string | null> {
   'use step';
   const db = createAdminClient();
-  const { data: next } = await db.from('chapters').select('id, title')
-    .eq('project_id', context.projectId).eq('status', 'draft')
-    .neq('id', context.chapterId).order('order_index').limit(1)
+  const { data: next } = await db
+    .from('chapters')
+    .select('id, title')
+    .eq('project_id', context.projectId)
+    .eq('status', 'draft')
+    .neq('id', context.chapterId)
+    .order('order_index')
+    .limit(1)
     .maybeSingle<{ id: string; title: string }>();
   if (!next) return null;
-  const { data: active } = await db.from('workflow_runs').select('id').eq('chapter_id', next.id)
-    .in('status', ['queued', 'running', 'awaiting_approval']).limit(1);
+  const { data: active } = await db
+    .from('workflow_runs')
+    .select('id')
+    .eq('chapter_id', next.id)
+    .in('status', ['queued', 'running', 'awaiting_approval'])
+    .limit(1);
   if ((active?.length ?? 0) > 0) return null;
 
   const resumeToken = randomUUID();
-  const { data: run, error } = await db.from('workflow_runs').insert({
-    project_id: context.projectId, organization_id: context.organizationId,
-    chapter_id: next.id, kind: 'chapter-audit', status: 'queued', total_steps: 14,
-    input: { chapterTitle: next.title, resumeToken, globalSequence: true },
-    started_by: context.actorId, started_at: new Date().toISOString(),
-  }).select('id').single<{ id: string }>();
-  if (error || !run) throw new Error(`Preparazione del capitolo successivo fallita: ${error?.message ?? 'riga non creata'}`);
+  const { data: run, error } = await db
+    .from('workflow_runs')
+    .insert({
+      project_id: context.projectId,
+      organization_id: context.organizationId,
+      chapter_id: next.id,
+      kind: 'chapter-audit',
+      status: 'queued',
+      total_steps: 14,
+      input: { chapterTitle: next.title, resumeToken, globalSequence: true },
+      started_by: context.actorId,
+      started_at: new Date().toISOString(),
+    })
+    .select('id')
+    .single<{ id: string }>();
+  if (error || !run)
+    throw new Error(
+      `Preparazione del capitolo successivo fallita: ${error?.message ?? 'riga non creata'}`,
+    );
 
   const [{ start }, { chapterAuditWorkflow }] = await Promise.all([
-    import('workflow/api'), import('./chapter-audit'),
+    import('workflow/api'),
+    import('./chapter-audit'),
   ]);
-  const started = await start(chapterAuditWorkflow, [{
-    workflowRunId: run.id, organizationId: context.organizationId, projectId: context.projectId,
-    chapterId: next.id, actorId: context.actorId, resumeToken, globalSequence: true,
-  }]);
-  await db.from('workflow_runs').update({ external_run_id: started.runId ?? null }).eq('id', run.id);
+  const started = await start(chapterAuditWorkflow, [
+    {
+      workflowRunId: run.id,
+      organizationId: context.organizationId,
+      projectId: context.projectId,
+      chapterId: next.id,
+      actorId: context.actorId,
+      resumeToken,
+      globalSequence: true,
+    },
+  ]);
+  await db
+    .from('workflow_runs')
+    .update({ external_run_id: started.runId ?? null })
+    .eq('id', run.id);
   return run.id;
 }
 
@@ -150,7 +182,10 @@ export async function loadChapter(context: RunContext): Promise<{
       })),
       links: analysis.links,
       figures: analysis.figures.map((f) => ({ alt: f.alt, src: f.src, line: f.line })),
-      placeholders: analysis.placeholders.map((p) => ({ description: p.description, line: p.line })),
+      placeholders: analysis.placeholders.map((p) => ({
+        description: p.description,
+        line: p.line,
+      })),
     },
     versionId: version.id,
     isIncremental,
@@ -257,35 +292,59 @@ export async function draftChapter(
 
   const db = createAdminClient();
 
-  const [{ data: chapterRow }, { data: project }, { data: baseVersion }, { data: manualChapters }] = await Promise.all([
-    db.from('chapters').select('part_id').eq('id', context.chapterId)
-      .maybeSingle<{ part_id: string | null }>(),
-    db.from('projects')
-      .select(
-        'language, level, tone, register, style_notes, work_shape, target_pages, scope, out_of_scope, audience',
-      )
-      .eq('id', context.projectId)
-      .maybeSingle<{
-        language: string;
-        level: 'base' | 'intermediate' | 'advanced';
-        tone: string;
-        register: string;
-        style_notes: string | null;
-        work_shape: string;
-        target_pages: number | null;
-        scope: string | null;
-        out_of_scope: string | null;
-        audience: string | null;
-      }>(),
-    db.from('chapter_versions').select('summary').eq('id', baseVersionId)
-      .maybeSingle<{ summary: string | null }>(),
-    db.from('chapters').select('id, number, title, status, current_version_id, order_index')
-      .eq('project_id', context.projectId).neq('kind', 'back_matter').order('order_index')
-      .returns<{ id: string; number: number | null; title: string; status: string; current_version_id: string | null; order_index: number }[]>(),
-  ]);
+  const [{ data: chapterRow }, { data: project }, { data: baseVersion }, { data: manualChapters }] =
+    await Promise.all([
+      db
+        .from('chapters')
+        .select('part_id')
+        .eq('id', context.chapterId)
+        .maybeSingle<{ part_id: string | null }>(),
+      db
+        .from('projects')
+        .select(
+          'language, level, tone, register, style_notes, work_shape, target_pages, scope, out_of_scope, audience',
+        )
+        .eq('id', context.projectId)
+        .maybeSingle<{
+          language: string;
+          level: 'base' | 'intermediate' | 'advanced';
+          tone: string;
+          register: string;
+          style_notes: string | null;
+          work_shape: string;
+          target_pages: number | null;
+          scope: string | null;
+          out_of_scope: string | null;
+          audience: string | null;
+        }>(),
+      db
+        .from('chapter_versions')
+        .select('summary')
+        .eq('id', baseVersionId)
+        .maybeSingle<{ summary: string | null }>(),
+      db
+        .from('chapters')
+        .select('id, number, title, status, current_version_id, order_index')
+        .eq('project_id', context.projectId)
+        .neq('kind', 'back_matter')
+        .order('order_index')
+        .returns<
+          {
+            id: string;
+            number: number | null;
+            title: string;
+            status: string;
+            current_version_id: string | null;
+            order_index: number;
+          }[]
+        >(),
+    ]);
 
   const { data: part } = chapterRow?.part_id
-    ? await db.from('publication_parts').select('title').eq('id', chapterRow.part_id)
+    ? await db
+        .from('publication_parts')
+        .select('title')
+        .eq('id', chapterRow.part_id)
         .maybeSingle<{ title: string }>()
     : { data: null };
 
@@ -293,15 +352,24 @@ export async function draftChapter(
   // capitolo non può poggiare su materiale che l'indice non conosceva.
   const [{ data: references }, { data: referenceChunks }, { data: sourceChunks }] =
     await Promise.all([
-      db.from('reference_sources').select('title, publisher, url')
+      db
+        .from('reference_sources')
+        .select('title, publisher, url')
         .or(`project_id.eq.${context.projectId},project_id.is.null`)
-        .neq('status', 'proposed').limit(60),
-      db.from('reference_chunks').select('heading, content')
+        .neq('status', 'proposed')
+        .limit(60),
+      db
+        .from('reference_chunks')
+        .select('heading, content')
         .or(`project_id.eq.${context.projectId},project_id.is.null`)
-        .order('chunk_index', { ascending: true }).limit(120),
-      db.from('source_chunks').select('heading_path, content')
+        .order('chunk_index', { ascending: true })
+        .limit(120),
+      db
+        .from('source_chunks')
+        .select('heading_path, content')
         .eq('project_id', context.projectId)
-        .order('chunk_index', { ascending: true }).limit(120),
+        .order('chunk_index', { ascending: true })
+        .limit(120),
     ]);
 
   const evidence = [
@@ -312,19 +380,31 @@ export async function draftChapter(
       (blocco) =>
         `${blocco.heading_path?.length ? `## ${blocco.heading_path.join(' > ')}\n` : ''}${blocco.content}`,
     ),
-  ].join('\n\n').slice(0, 60_000);
+  ]
+    .join('\n\n')
+    .slice(0, 60_000);
 
   // L'obiettivo è ciò che la fase di struttura ha promesso per questo capitolo.
   const obiettivo = chapter.contentMd.match(/##\s*Obiettivo\s*\n+([\s\S]*?)(?:\n#{1,2}\s|$)/i);
-  const precedenti = (manualChapters ?? []).filter((item) =>
-    item.order_index < ((manualChapters ?? []).find((candidate) => candidate.id === context.chapterId)?.order_index ?? 0)
-    && ['in_review', 'approved', 'published'].includes(item.status) && item.current_version_id,
+  const precedenti = (manualChapters ?? []).filter(
+    (item) =>
+      item.order_index <
+        ((manualChapters ?? []).find((candidate) => candidate.id === context.chapterId)
+          ?.order_index ?? 0) &&
+      ['in_review', 'approved', 'published'].includes(item.status) &&
+      item.current_version_id,
   );
-  const { data: previousVersions } = precedenti.length > 0
-    ? await db.from('chapter_versions').select('id, summary, content_md')
-        .in('id', precedenti.map((item) => item.current_version_id!))
-        .returns<{ id: string; summary: string | null; content_md: string }[]>()
-    : { data: [] as { id: string; summary: string | null; content_md: string }[] };
+  const { data: previousVersions } =
+    precedenti.length > 0
+      ? await db
+          .from('chapter_versions')
+          .select('id, summary, content_md')
+          .in(
+            'id',
+            precedenti.map((item) => item.current_version_id!),
+          )
+          .returns<{ id: string; summary: string | null; content_md: string }[]>()
+      : { data: [] as { id: string; summary: string | null; content_md: string }[] };
 
   // Quanti capitoli si dividono il budget: quelli di chiusura generati da
   // codice non consumano quota, perché non li scrive un modello.
@@ -382,8 +462,17 @@ export async function draftChapter(
     existingContent: chapter.contentMd,
     manualOutline: (manualChapters ?? []).map((item) => `${item.number ?? '—'}. ${item.title}`),
     previousChapters: precedenti.map((item) => {
-      const version = previousVersions?.find((candidate) => candidate.id === item.current_version_id);
-      return { title: item.title, summary: (version?.summary || version?.content_md.slice(0, 1200) || 'Capitolo già elaborato.').slice(0, 2000) };
+      const version = previousVersions?.find(
+        (candidate) => candidate.id === item.current_version_id,
+      );
+      return {
+        title: item.title,
+        summary: (
+          version?.summary ||
+          version?.content_md.slice(0, 1200) ||
+          'Capitolo già elaborato.'
+        ).slice(0, 2000),
+      };
     }),
   };
 
@@ -510,7 +599,10 @@ export async function draftChapter(
       })),
       links: analysis.links,
       figures: analysis.figures.map((f) => ({ alt: f.alt, src: f.src, line: f.line })),
-      placeholders: analysis.placeholders.map((p) => ({ description: p.description, line: p.line })),
+      placeholders: analysis.placeholders.map((p) => ({
+        description: p.description,
+        line: p.line,
+      })),
     },
     versionId: created.id,
     gaps,
@@ -581,18 +673,23 @@ export async function auditSources(
       ],
       // L'esito non è incerto: l'assenza è un fatto constatato, non una stima.
       confidence: 1,
-      summary: 'Nessun collegamento e nessuna affermazione da verificare: audit delle fonti non eseguito.',
+      summary:
+        'Nessun collegamento e nessuna affermazione da verificare: audit delle fonti non eseguito.',
     };
   }
 
-  const result = await runAgent(sourceAuditorAgent, { ...chapter, claims }, {
-    db: createAdminClient(),
-    organizationId: context.organizationId,
-    projectId: context.projectId,
-    chapterId: context.chapterId,
-    workflowRunId: context.workflowRunId,
-    stepName: 'verifica-fonti',
-  });
+  const result = await runAgent(
+    sourceAuditorAgent,
+    { ...chapter, claims },
+    {
+      db: createAdminClient(),
+      organizationId: context.organizationId,
+      projectId: context.projectId,
+      chapterId: context.chapterId,
+      workflowRunId: context.workflowRunId,
+      stepName: 'verifica-fonti',
+    },
+  );
 
   return result.output;
 }
@@ -864,7 +961,19 @@ export async function proposeRevision(
     },
   );
 
-  const revision: RevisionOutput = result.output;
+  let revision: RevisionOutput = result.output;
+
+  // Il campo contentMd deve essere il capitolo completo, non un promemoria con
+  // comandi “Sostituisci/Aggiungi”. Se il modello confonde i due formati,
+  // recuperiamo la revisione deterministica che opera sul testo originale.
+  if (sembraPromemoriaDiRevisione(revision.contentMd)) {
+    const deterministica = technicalWriterAgent.deterministic?.({
+      ...chapter,
+      issues,
+      suggestions,
+    });
+    if (deterministica) revision = deterministica;
+  }
 
   // Nessun intervento: non si crea una versione identica all'originale.
   if (revision.changes.length === 0) {
@@ -907,9 +1016,16 @@ export async function proposeRevision(
     .select('id')
     .single<{ id: string }>();
 
-  if (error || !created) throw new Error(`Salvataggio della proposta fallito: ${error?.message ?? ''}`);
+  if (error || !created)
+    throw new Error(`Salvataggio della proposta fallito: ${error?.message ?? ''}`);
 
   return { versionId: created.id, changeCount: revision.changes.length, summary: revision.summary };
+}
+
+function sembraPromemoriaDiRevisione(contentMd: string): boolean {
+  const istruzioni =
+    contentMd.match(/^(?:sostituisci|aggiungi|rimuovi|correggi)\b/gim)?.length ?? 0;
+  return /(^|\n)#{1,3}\s+revisioni proposte\b/i.test(contentMd) && istruzioni >= 2;
 }
 
 // ---------------------------------------------------------------------------
@@ -987,7 +1103,8 @@ export async function generateDiagrams(
     .select('id')
     .single<{ id: string }>();
 
-  if (error || !asset) throw new Error(`Salvataggio del diagramma fallito: ${error?.message ?? ''}`);
+  if (error || !asset)
+    throw new Error(`Salvataggio del diagramma fallito: ${error?.message ?? ''}`);
 
   return { assetIds: [asset.id], mermaid: diagram.mermaid };
 }
@@ -1025,7 +1142,8 @@ export async function requestApproval(
     .select('id')
     .single<{ id: string }>();
 
-  if (error || !data) throw new Error(`Creazione della richiesta di revisione fallita: ${error?.message ?? ''}`);
+  if (error || !data)
+    throw new Error(`Creazione della richiesta di revisione fallita: ${error?.message ?? ''}`);
 
   await db
     .from('workflow_runs')
@@ -1104,7 +1222,12 @@ export async function markStep(
 
   await createAdminClient()
     .from('workflow_runs')
-    .update({ current_step: step, completed_steps: completed, total_steps: total, status: 'running' })
+    .update({
+      current_step: step,
+      completed_steps: completed,
+      total_steps: total,
+      status: 'running',
+    })
     .eq('id', workflowRunId);
 }
 

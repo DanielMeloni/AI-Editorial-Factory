@@ -65,9 +65,18 @@ import {
  */
 export interface AgentDefinition<I, O> {
   key:
-    | 'ingestion' | 'source_auditor' | 'curriculum' | 'technical_verifier'
-    | 'technical_writer' | 'teaching' | 'visual_art_director' | 'technical_diagram'
-    | 'illustration' | 'cover' | 'editorial_reviewer' | 'publishing';
+    | 'ingestion'
+    | 'source_auditor'
+    | 'curriculum'
+    | 'technical_verifier'
+    | 'technical_writer'
+    | 'teaching'
+    | 'visual_art_director'
+    | 'technical_diagram'
+    | 'illustration'
+    | 'cover'
+    | 'editorial_reviewer'
+    | 'publishing';
   name: string;
   version: number;
   promptVersion: string;
@@ -141,7 +150,11 @@ export const technicalVerifierAgent: AgentDefinition<ChapterInput, TechnicalVeri
         title: 'Affermazione senza fonte',
         detail: `«${claim.statement.slice(0, 200)}» è un’affermazione verificabile ma non rimanda ad alcuna fonte.`,
         suggestion: 'Collegare la documentazione ufficiale che sostiene l’affermazione.',
-        location: { line: claim.line, heading: headingAbove(input, claim.line), excerpt: claim.statement.slice(0, 300) },
+        location: {
+          line: claim.line,
+          heading: headingAbove(input, claim.line),
+          excerpt: claim.statement.slice(0, 300),
+        },
         evidence: [],
       });
     }
@@ -225,14 +238,20 @@ export const sourceAuditorAgent: AgentDefinition<SourceAuditorInput, SourceAudit
             : alternative.length > 0
               ? `Affiancare o sostituire con la documentazione ufficiale: ${alternative[0]!.title} — ${alternative[0]!.url ?? ''}`
               : 'Affiancare o sostituire con la documentazione ufficiale del prodotto.',
-        location: { line: citation.line, heading: headingAbove(input, citation.line), excerpt: citation.url },
+        location: {
+          line: citation.line,
+          heading: headingAbove(input, citation.line),
+          excerpt: citation.url,
+        },
         evidence: [citation.url],
       });
     }
 
     // 2. Riferimento ufficiale che l'indice non conosce: la documentazione viene
     //    riorganizzata spesso, e un collegamento morto è peggio di uno assente.
-    for (const citation of citations.filter((c) => c.verification === 'ufficiale_non_indicizzata')) {
+    for (const citation of citations.filter(
+      (c) => c.verification === 'ufficiale_non_indicizzata',
+    )) {
       issues.push({
         kind: 'source',
         severity: 'low',
@@ -241,7 +260,11 @@ export const sourceAuditorAgent: AgentDefinition<SourceAuditorInput, SourceAudit
           `La pagina ${citation.url} è su un dominio ufficiale ma non risulta nell’indice ` +
           'curato: potrebbe essere stata spostata o rinominata.',
         suggestion: 'Aprire il collegamento e, se necessario, aggiornarlo.',
-        location: { line: citation.line, heading: headingAbove(input, citation.line), excerpt: citation.url },
+        location: {
+          line: citation.line,
+          heading: headingAbove(input, citation.line),
+          excerpt: citation.url,
+        },
         evidence: [citation.url],
       });
     }
@@ -251,7 +274,8 @@ export const sourceAuditorAgent: AgentDefinition<SourceAuditorInput, SourceAudit
         kind: 'source',
         severity: 'medium',
         title: 'Nessun riferimento esterno',
-        detail: 'Il capitolo non cita alcuna fonte: le affermazioni tecniche restano non verificabili dal lettore.',
+        detail:
+          'Il capitolo non cita alcuna fonte: le affermazioni tecniche restano non verificabili dal lettore.',
         suggestion: 'Aggiungere almeno un rimando alla documentazione ufficiale.',
         location: { line: null, heading: null, excerpt: null },
         evidence: [],
@@ -293,7 +317,9 @@ export const sourceAuditorAgent: AgentDefinition<SourceAuditorInput, SourceAudit
     }
 
     const ufficiali = citations.filter((c) => c.isOfficial).length;
-    const daVerificare = citations.filter((c) => c.verification === 'ufficiale_non_indicizzata').length;
+    const daVerificare = citations.filter(
+      (c) => c.verification === 'ufficiale_non_indicizzata',
+    ).length;
 
     return {
       citations,
@@ -307,7 +333,9 @@ export const sourceAuditorAgent: AgentDefinition<SourceAuditorInput, SourceAudit
         `${citations.length} riferimenti, di cui ${ufficiali} ufficiali` +
         (daVerificare > 0 ? ` (${daVerificare} da verificare)` : '') +
         `. ${suggestions.length} fonti proposte su ${research.examined} affermazioni prive di rimando` +
-        (unmatchedClaims > 0 ? `; per ${unmatchedClaims} l’indice non ha nulla di pertinente.` : '.'),
+        (unmatchedClaims > 0
+          ? `; per ${unmatchedClaims} l’indice non ha nulla di pertinente.`
+          : '.'),
     };
   },
 };
@@ -342,7 +370,10 @@ export const technicalWriterAgent: AgentDefinition<TechnicalWriterInput, Revisio
       `Capitolo ${input.number ?? '—'}: ${input.title}`,
       '',
       'Problemi rilevati:',
-      ...input.issues.map((issue) => `- [${issue.severity}] riga ${issue.location.line ?? '—'}: ${issue.title} — ${issue.detail}`),
+      ...input.issues.map(
+        (issue) =>
+          `- [${issue.severity}] riga ${issue.location.line ?? '—'}: ${issue.title} — ${issue.detail}`,
+      ),
       '',
       'Fonti ufficiali già individuate (usa soltanto questi URL):',
       ...input.suggestions.flatMap((suggestion) => [
@@ -451,7 +482,10 @@ export const technicalWriterAgent: AgentDefinition<TechnicalWriterInput, Revisio
           'l’indice ufficiale non contiene nulla di pertinente:',
         ...daVerificare
           .slice(0, 20)
-          .map((issue) => `> - riga ${issue.location.line ?? '—'}: ${issue.location.excerpt ?? issue.detail}`),
+          .map(
+            (issue) =>
+              `> - riga ${issue.location.line ?? '—'}: ${issue.location.excerpt ?? issue.detail}`,
+          ),
       );
       changes.push({
         kind: 'nota_verifica',
@@ -570,7 +604,11 @@ function inferLanguage(content: string): string {
 }
 
 function descrizioneDaPercorso(src: string): string {
-  const nome = src.split('/').pop()?.replace(/\.[a-z0-9]+$/i, '') ?? 'figura';
+  const nome =
+    src
+      .split('/')
+      .pop()
+      ?.replace(/\.[a-z0-9]+$/i, '') ?? 'figura';
   return nome.replace(/[-_]+/g, ' ').replace(/^./, (c) => c.toUpperCase());
 }
 
@@ -698,8 +736,8 @@ const CONVENZIONI =
   'nordshop-analytics, dataset raw, analytics e sandbox, tabelle raw.customers, raw.products, ' +
   'raw.orders, raw.order_items. Non sono segnaposto: sono i nomi concreti da usare.\n' +
   '- Non inserire mai «TODO» o «da completare»: una lacuna si dichiara in «gaps», non si nasconde nel testo.\n' +
-  '- Nel testo non compaiono URL, collegamenti né rimandi bibliografici. Le fonti sono raccolte '+
-  'in un capitolo di bibliografia a parte: nomina pure «la documentazione ufficiale di Dataform», '+
+  '- Nel testo non compaiono URL, collegamenti né rimandi bibliografici. Le fonti sono raccolte ' +
+  'in un capitolo di bibliografia a parte: nomina pure «la documentazione ufficiale di Dataform», ' +
   'ma senza indirizzo.';
 
 /**
@@ -734,10 +772,12 @@ export const chapterPlanAgent: AgentDefinition<ChapterDraftInput, ChapterPlanOut
       'Posizione nel flusso globale del manuale:',
       ...input.manualOutline.map((title) => `- ${title}`),
       input.previousChapters.length ? '' : '',
-      ...(input.previousChapters.length ? [
-        'Capitoli precedenti già approvati — dai questi contenuti per acquisiti e non ripeterli:',
-        ...input.previousChapters.map((item) => `- ${item.title}: ${item.summary}`),
-      ] : []),
+      ...(input.previousChapters.length
+        ? [
+            'Capitoli precedenti già approvati — dai questi contenuti per acquisiti e non ripeterli:',
+            ...input.previousChapters.map((item) => `- ${item.title}: ${item.summary}`),
+          ]
+        : []),
       '',
       'Estratti disponibili:',
       input.evidence || '(nessun estratto disponibile)',
@@ -798,8 +838,9 @@ export const chapterSectionAgent: AgentDefinition<ChapterSectionInput, ChapterSe
       input.direzione,
       '',
       'Scaletta completa del capitolo — le altre sezioni esistono già o esisteranno, non invaderle:',
-      ...input.outline.map((titolo, indice) =>
-        `${indice + 1 === input.sectionNumber ? '→ ' : '  '}${input.number ?? ''}.${indice + 1} ${titolo}`,
+      ...input.outline.map(
+        (titolo, indice) =>
+          `${indice + 1 === input.sectionNumber ? '→ ' : '  '}${input.number ?? ''}.${indice + 1} ${titolo}`,
       ),
       '',
       `Sezione da scrivere: ${input.number ?? ''}.${input.sectionNumber} ${input.sectionTitle}`,
@@ -848,42 +889,40 @@ export const chapterApparatusInputSchema = chapterDraftInputSchema.extend({
  * Riceve il corpo già scritto perché deve riassumere quello. Un riassunto
  * dedotto dalla scaletta riassumerebbe le intenzioni, non il capitolo.
  */
-export const chapterApparatusAgent: AgentDefinition<
-  ChapterApparatusInput,
-  ChapterApparatusOutput
-> = {
-  key: 'technical_writer',
-  name: 'Chapter Apparatus',
-  version: 1,
-  promptVersion: 'v1',
-  inputSchema: chapterApparatusInputSchema as unknown as z.ZodType<ChapterApparatusInput>,
-  outputSchema: chapterApparatusOutputSchema,
-  maxOutputTokens: 8000,
-  system:
-    'Componi l’apparato di chiusura di un capitolo di manuale tecnico: best practice, errori ' +
-    'comuni, riassunto, punti chiave, quiz e laboratorio. Ti basi soltanto sul capitolo che ti ' +
-    'viene dato e sugli estratti: non introduci concetti che il capitolo non tratta. ' +
-    'Il quiz ha una sola risposta corretta per domanda e le tre alternative sono plausibili, non ' +
-    'assurde. Il laboratorio è un esercizio eseguibile in un progetto Google Cloud reale, con ' +
-    'obiettivo, passi e risultato atteso. Non produci alcuna bibliografia e non inserisci URL: ' +
-    'le fonti sono raccolte in un capitolo a parte. Rispondi in italiano.\n\n' +
-    CONVENZIONI,
+export const chapterApparatusAgent: AgentDefinition<ChapterApparatusInput, ChapterApparatusOutput> =
+  {
+    key: 'technical_writer',
+    name: 'Chapter Apparatus',
+    version: 1,
+    promptVersion: 'v1',
+    inputSchema: chapterApparatusInputSchema as unknown as z.ZodType<ChapterApparatusInput>,
+    outputSchema: chapterApparatusOutputSchema,
+    maxOutputTokens: 8000,
+    system:
+      'Componi l’apparato di chiusura di un capitolo di manuale tecnico: best practice, errori ' +
+      'comuni, riassunto, punti chiave, quiz e laboratorio. Ti basi soltanto sul capitolo che ti ' +
+      'viene dato e sugli estratti: non introduci concetti che il capitolo non tratta. ' +
+      'Il quiz ha una sola risposta corretta per domanda e le tre alternative sono plausibili, non ' +
+      'assurde. Il laboratorio è un esercizio eseguibile in un progetto Google Cloud reale, con ' +
+      'obiettivo, passi e risultato atteso. Non produci alcuna bibliografia e non inserisci URL: ' +
+      'le fonti sono raccolte in un capitolo a parte. Rispondi in italiano.\n\n' +
+      CONVENZIONI,
 
-  buildPrompt: (input) =>
-    [
-      `Capitolo ${input.number ?? '—'}: ${input.title}`,
-      `Obiettivi dichiarati: ${input.objectives.join(' · ')}`,
-      '',
-      input.direzione,
-      '',
-      'Capitolo scritto:',
-      input.body.slice(0, 60_000),
-      '',
-      'Ogni elemento di `gaps` deve essere una frase sintetica di massimo 300 caratteri.',
-    ]
-      .filter(Boolean)
-      .join('\n'),
-};
+    buildPrompt: (input) =>
+      [
+        `Capitolo ${input.number ?? '—'}: ${input.title}`,
+        `Obiettivi dichiarati: ${input.objectives.join(' · ')}`,
+        '',
+        input.direzione,
+        '',
+        'Capitolo scritto:',
+        input.body.slice(0, 60_000),
+        '',
+        'Ogni elemento di `gaps` deve essere una frase sintetica di massimo 300 caratteri.',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+  };
 
 // ===========================================================================
 // Blog — piano degli angoli e stesura
@@ -958,6 +997,30 @@ export const blogPlanAgent: AgentDefinition<BlogPlanInput, BlogPlanOutput> = {
     ]
       .filter(Boolean)
       .join('\n'),
+
+  deterministic: (input) => {
+    const basi = input.outline.length > 0 ? input.outline : [input.projectTitle];
+    const articles = Array.from(
+      { length: Math.min(input.count, Math.max(1, basi.length)) },
+      (_, indice) => {
+        const voce = basi[indice % basi.length]!.replace(/^Capitolo\s+\S+\s+—\s+/i, '');
+        return {
+          title: `${voce}: guida pratica`,
+          angle: `Una guida operativa basata sul manuale per applicare correttamente ${voce}, con decisioni ed errori da evitare.`,
+          targetKeyword: voce.slice(0, 120),
+          secondaryKeywords: [input.projectTitle.slice(0, 120)],
+          searchIntent: 'procedurale',
+        };
+      },
+    );
+    return {
+      articles,
+      note:
+        articles.length < input.count
+          ? `Il manuale supporta ${articles.length} angoli distinti senza ripetizioni.`
+          : '',
+    };
+  },
 };
 
 /** Scrive un articolo del piano. */
@@ -1001,7 +1064,62 @@ export const blogArticleAgent: AgentDefinition<BlogArticleInput, BlogArticleOutp
     ]
       .filter(Boolean)
       .join('\n'),
+
+  deterministic: (input) => {
+    const estratto = input.evidence.trim().slice(0, 12_000);
+    const corpo = estratto || 'Il manuale approvato non contiene ancora estratti sufficienti.';
+    const risposta = `${input.title} si affronta partendo dal flusso descritto nel manuale e verificando ogni passaggio sul contesto reale del progetto.`;
+    return {
+      contentMd: [
+        `# ${input.title}`,
+        '',
+        risposta,
+        '',
+        `## ${input.targetKeyword || input.title}`,
+        '',
+        corpo,
+        '',
+        '## Punti da verificare',
+        '',
+        '- Verifica prerequisiti e dipendenze prima di applicare la procedura.',
+        '- Confronta il risultato con gli obiettivi dichiarati nel manuale.',
+        '',
+        '## Domande frequenti',
+        '',
+        `### Da dove iniziare con ${input.targetKeyword || input.title}?`,
+        '',
+        'Dalla sezione pertinente del manuale approvato, procedendo nell’ordine delle dipendenze.',
+      ].join('\n'),
+      slug: slugForArticle(input.title),
+      metaTitle: input.title.slice(0, 70),
+      metaDescription: risposta.slice(0, 160),
+      answerSummary: risposta.slice(0, 400),
+      keyTakeaways: [
+        'Partire dal materiale approvato e dalle sue dipendenze.',
+        'Verificare il risultato prima di passare allo step successivo.',
+      ],
+      faq: [
+        {
+          question: `Da dove iniziare con ${input.targetKeyword || input.title}?`.slice(0, 300),
+          answer: 'Dalla sezione pertinente del manuale approvato, seguendo l’ordine proposto.',
+        },
+      ],
+      entities: [input.targetKeyword || input.projectTitle].filter(Boolean).slice(0, 20),
+      internalLinkHints: input.siblings.slice(0, 10),
+      gaps: estratto ? [] : ['Il manuale approvato non contiene estratti sufficienti.'],
+    };
+  },
 };
+
+function slugForArticle(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 120);
+}
 
 // ===========================================================================
 // Corsi — piano e lezioni
@@ -1085,17 +1203,16 @@ export const courseLessonAgent: AgentDefinition<CourseLessonInput, CourseLessonO
       `Corso su: ${input.topic}`,
       `Lezione ${input.lessonNumber}: ${input.lessonTitle}`,
       `Compito della lezione: ${input.lessonIntent}`,
-      input.lessonObjectives.length > 0
-        ? `Obiettivi: ${input.lessonObjectives.join(' · ')}`
-        : '',
+      input.lessonObjectives.length > 0 ? `Obiettivi: ${input.lessonObjectives.join(' · ')}` : '',
       DURATE_CORSO(input.lessonMinutes),
       FORMATI_CORSO[input.format] ?? '',
       '',
       input.direzione,
       '',
       'Scaletta completa del corso — non invadere le altre lezioni:',
-      ...input.outline.map((titolo, indice) =>
-        `${indice + 1 === input.lessonNumber ? '→ ' : '  '}${indice + 1}. ${titolo}`,
+      ...input.outline.map(
+        (titolo, indice) =>
+          `${indice + 1 === input.lessonNumber ? '→ ' : '  '}${indice + 1}. ${titolo}`,
       ),
       '',
       'Estratti su cui basarti:',

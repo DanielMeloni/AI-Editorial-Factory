@@ -29,14 +29,17 @@ export function MermaidDiagram({
   const reactId = useId();
   const identificativo = `mermaid-${reactId.replace(/[^a-zA-Z0-9]/g, '')}`;
 
-  const [svg, setSvg] = useState<string | null>(null);
-  const [errore, setErrore] = useState<string | null>(null);
+  const [resa, setResa] = useState<{
+    source: string;
+    svg: string | null;
+    errore: string | null;
+  } | null>(null);
   const vivo = useRef(true);
+  const svg = resa?.source === source ? resa.svg : null;
+  const errore = resa?.source === source ? resa.errore : null;
 
   useEffect(() => {
     vivo.current = true;
-    setSvg(null);
-    setErrore(null);
 
     void (async () => {
       try {
@@ -50,10 +53,14 @@ export function MermaidDiagram({
           flowchart: { useMaxWidth: true, htmlLabels: false },
         });
         const { svg: disegnato } = await mermaid.render(identificativo, source);
-        if (vivo.current) setSvg(disegnato);
+        if (vivo.current) setResa({ source, svg: disegnato, errore: null });
       } catch (error) {
         if (vivo.current) {
-          setErrore(error instanceof Error ? error.message : 'Errore sconosciuto.');
+          setResa({
+            source,
+            svg: null,
+            errore: error instanceof Error ? error.message : 'Errore sconosciuto.',
+          });
         }
       }
     })();
@@ -69,28 +76,28 @@ export function MermaidDiagram({
         <div
           role="img"
           aria-label={title ?? 'Diagramma'}
-          className="[&_svg]:h-auto [&_svg]:w-full overflow-x-auto rounded-lg border border-border-subtle bg-surface-muted p-3"
+          className="border-border-subtle bg-surface-muted overflow-x-auto rounded-lg border p-3 [&_svg]:h-auto [&_svg]:w-full"
           dangerouslySetInnerHTML={{ __html: svg }}
         />
       ) : errore === null ? (
-        <div className="rounded-lg border border-border-subtle bg-surface-muted p-3 text-xs text-muted-foreground">
+        <div className="border-border-subtle bg-surface-muted text-muted-foreground rounded-lg border p-3 text-xs">
           Disegno del diagramma in corso…
         </div>
       ) : (
-        <p className="rounded-lg border border-danger/40 bg-danger/10 p-3 text-xs text-danger">
+        <p className="border-danger/40 bg-danger/10 text-danger rounded-lg border p-3 text-xs">
           Il diagramma non è stato disegnato: {errore} Il sorgente qui sotto resta valido.
         </p>
       )}
 
       {mostraSorgente ? (
-      <details className="mt-2">
-        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-          Sorgente Mermaid
-        </summary>
-        <pre className="mt-1 overflow-x-auto rounded-lg border border-border-subtle bg-surface-muted p-3 text-[11px] leading-tight">
-          <code>{source}</code>
-        </pre>
-      </details>
+        <details className="mt-2">
+          <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-xs">
+            Sorgente Mermaid
+          </summary>
+          <pre className="border-border-subtle bg-surface-muted mt-1 overflow-x-auto rounded-lg border p-3 text-[11px] leading-tight">
+            <code>{source}</code>
+          </pre>
+        </details>
       ) : null}
     </div>
   );

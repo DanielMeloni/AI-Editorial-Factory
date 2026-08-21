@@ -75,36 +75,57 @@ export async function composeVolume(
 
   const soloApprovati = opzioni.soloApprovati ?? false;
 
-  const inclusi = (capitoli ?? []).filter(
-    (capitolo) =>
-      Boolean(capitolo.current_version_id) && (!soloApprovati || approvato(capitolo)),
+  const candidati = (capitoli ?? []).filter(
+    (capitolo) => Boolean(capitolo.current_version_id) && (!soloApprovati || approvato(capitolo)),
   );
-  const pending = (capitoli ?? [])
-    .filter(
-      (capitolo) =>
-        !capitolo.current_version_id || (soloApprovati && !approvato(capitolo)),
-    )
+  const pending: { title: string; status: string }[] = (capitoli ?? [])
+    .filter((capitolo) => !capitolo.current_version_id || (soloApprovati && !approvato(capitolo)))
     .map((capitolo) => ({ title: capitolo.title, status: capitolo.status }));
 
-  if (inclusi.length === 0) {
+  if (candidati.length === 0) {
     return { chapters: [], totals: { chapters: 0, words: 0 }, pending };
   }
 
   const { data: versioni } = await supabase
     .from('chapter_versions')
-    .select('id, content_md, version_no, word_count')
+    .select('id, chapter_id, content_md, version_no, word_count, parent_version_id')
     .in(
-      'id',
-      inclusi.map((capitolo) => capitolo.current_version_id!),
+      'chapter_id',
+      candidati.map((capitolo) => capitolo.id),
     )
-    .returns<{ id: string; content_md: string; version_no: number; word_count: number }[]>();
+    .returns<
+      {
+        id: string;
+        chapter_id: string;
+        content_md: string;
+        version_no: number;
+        word_count: number;
+        parent_version_id: string | null;
+      }[]
+    >();
 
   const perId = new Map((versioni ?? []).map((versione) => [versione.id, versione]));
 
   const chapters: CapitoloVolume[] = [];
-  for (const capitolo of inclusi) {
-    const versione = perId.get(capitolo.current_version_id!);
-    if (!versione) continue;
+  for (const capitolo of candidati) {
+    let versione = perId.get(capitolo.current_version_id!);
+    // Alcuni output storici del revisore contenevano istruzioni del tipo
+    // “Sostituisci…” al posto del manoscritto completo. Per l'anteprima si
+    // risale alla versione genitore finché si trova un capitolo vero.
+    const visitati = new Set<string>();
+    while (
+      versione &&
+      sembraPromemoriaDiRevisione(versione.content_md) &&
+      versione.parent_version_id &&
+      !visitati.has(versione.id)
+    ) {
+      visitati.add(versione.id);
+      versione = perId.get(versione.parent_version_id);
+    }
+    if (!versione || versione.content_md.trim() === '') {
+      pending.push({ title: capitolo.title, status: capitolo.status });
+      continue;
+    }
     chapters.push({
       id: capitolo.id,
       approvato: approvato(capitolo),
@@ -127,6 +148,12 @@ export async function composeVolume(
     },
     pending,
   };
+}
+
+function sembraPromemoriaDiRevisione(contentMd: string): boolean {
+  const istruzioni =
+    contentMd.match(/^(?:sostituisci|aggiungi|rimuovi|correggi)\b/gim)?.length ?? 0;
+  return /(^|\n)#{1,3}\s+revisioni proposte\b/i.test(contentMd) && istruzioni >= 2;
 }
 
 /** L'etichetta con cui il capitolo si presenta nell'indice e in testata. */

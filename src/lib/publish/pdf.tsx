@@ -562,7 +562,6 @@ export async function exportVolumePdfLineare(
       chapter: capitolo,
       content: parte,
       part: indice + 1,
-      total: Math.max(parti.length, 1),
     }));
   });
 
@@ -585,16 +584,17 @@ export async function exportVolumePdfLineare(
         </Text>
       </Page>
 
-      {pagine.map(({ chapter, content, part, total }, indice) => (
+      {pagine.map(({ chapter, content, part }, indice) => (
         <Page
           key={`safe-${indice}`}
           size="A4"
           style={{ padding: 48, fontFamily: 'Times-Roman', fontSize: 9.5 }}
         >
-          <Text style={{ fontFamily: 'Times-Bold', fontSize: 15, marginBottom: 12 }}>
-            {pulisciTestoPdf(`${chapter.label} — ${chapter.title}`)}
-            {total > 1 ? ` · parte ${part}/${total}` : ''}
-          </Text>
+          {part === 1 ? (
+            <Text style={{ fontFamily: 'Times-Bold', fontSize: 15, marginBottom: 12 }}>
+              {pulisciTestoPdf(`${chapter.label} — ${chapter.title}`)}
+            </Text>
+          ) : null}
           <Text>{content}</Text>
         </Page>
       ))}

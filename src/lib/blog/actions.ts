@@ -59,28 +59,33 @@ export async function createBlogPlan(input: {
     };
   }
 
-  const piano = (
-    await runAgent(
-      blogPlanAgent,
-      {
-        projectTitle: materiale.project.title,
-        projectSubtitle: materiale.project.subtitle,
-        direzione: materiale.direzione,
-        language: materiale.project.language,
-        count: parsed.data.count,
-        outline: materiale.outline,
-        evidence: materiale.evidence,
-      },
-      {
-        db: createAdminClient(),
-        organizationId: organization.id,
-        projectId: parsed.data.projectId,
-        chapterId: null,
-        workflowRunId: null,
-        stepName: 'piano-blog',
-      },
-    )
-  ).output;
+  let piano;
+  try {
+    piano = (
+      await runAgent(
+        blogPlanAgent,
+        {
+          projectTitle: materiale.project.title,
+          projectSubtitle: materiale.project.subtitle,
+          direzione: materiale.direzione,
+          language: materiale.project.language,
+          count: parsed.data.count,
+          outline: materiale.outline,
+          evidence: materiale.evidence,
+        },
+        {
+          db: createAdminClient(),
+          organizationId: organization.id,
+          projectId: parsed.data.projectId,
+          chapterId: null,
+          workflowRunId: null,
+          stepName: 'piano-blog',
+        },
+      )
+    ).output;
+  } catch (error) {
+    return { ok: false, message: `Creazione del piano non riuscita: ${(error as Error).message}` };
+  }
 
   const { data: plan, error } = await supabase
     .from('blog_plans')
@@ -112,7 +117,12 @@ export async function createBlogPlan(input: {
   }));
 
   const { error: erroreRighe } = await supabase.from('blog_articles').insert(righe);
-  if (erroreRighe) return { ok: false, message: `Articoli non salvati: ${erroreRighe.message}` };
+  if (erroreRighe) {
+    // Il piano senza righe diventerebbe comunque “l'ultimo piano” e renderebbe
+    // la pagina inutilizzabile. La creazione è un'unica operazione logica.
+    await supabase.from('blog_plans').delete().eq('id', plan.id);
+    return { ok: false, message: `Articoli non salvati: ${erroreRighe.message}` };
+  }
 
   await recordAudit({
     organizationId: organization.id,
@@ -154,7 +164,13 @@ export async function decideBlogPlan(
     return { ok: false, message: 'Piano non trovato.' };
   }
 
-  await supabase.from('blog_plans').update({ status: decision }).eq('id', planId);
+  const { error: updateError } = await supabase
+    .from('blog_plans')
+    .update({ status: decision })
+    .eq('id', planId);
+  if (updateError) {
+    return { ok: false, message: `Decisione non salvata: ${updateError.message}` };
+  }
 
   await recordAudit({
     organizationId: organization.id,
@@ -167,7 +183,10 @@ export async function decideBlogPlan(
   revalidatePath(`/projects/${plan.project_id}/blog`);
   return {
     ok: true,
-    message: decision === 'approved' ? 'Piano approvato: ora puoi generare gli articoli.' : 'Piano rifiutato.',
+    message:
+      decision === 'approved'
+        ? 'Piano approvato: ora puoi generare gli articoli.'
+        : 'Piano rifiutato.',
   };
 }
 
@@ -184,9 +203,15 @@ export async function generateBlogArticle(articleId: string): Promise<BlogAction
     )
     .eq('id', articleId)
     .maybeSingle<{
-      id: string; plan_id: string; project_id: string; organization_id: string;
-      title: string; angle: string; target_keyword: string | null;
-      secondary_keywords: string[]; search_intent: string | null;
+      id: string;
+      plan_id: string;
+      project_id: string;
+      organization_id: string;
+      title: string;
+      angle: string;
+      target_keyword: string | null;
+      secondary_keywords: string[];
+      search_intent: string | null;
     }>();
 
   if (!articolo || articolo.organization_id !== organization.id) {
@@ -206,6 +231,9 @@ export async function generateBlogArticle(articleId: string): Promise<BlogAction
 
   const materiale = await raccogliMateriale(supabase, articolo.project_id);
   if (!materiale) return { ok: false, message: 'Progetto non trovato.' };
+  if (materiale.chapters.length === 0) {
+    return { ok: false, message: 'Non ci sono capitoli approvati completi da cui scrivere.' };
+  }
 
   const { data: fratelli } = await supabase
     .from('blog_articles')
@@ -214,7 +242,12 @@ export async function generateBlogArticle(articleId: string): Promise<BlogAction
     .neq('id', articleId)
     .returns<{ title: string }[]>();
 
-  await supabase.from('blog_articles').update({ status: 'generating', error: null }).eq('id', articleId);
+  const { error: startError } = await supabase
+    .from('blog_articles')
+    .update({ status: 'generating', error: null })
+    .eq('id', articleId);
+  if (startError)
+    return { ok: false, message: `Avvio della stesura non riuscito: ${startError.message}` };
 
   try {
     const scritto = (
@@ -246,7 +279,7 @@ export async function generateBlogArticle(articleId: string): Promise<BlogAction
       )
     ).output;
 
-    await supabase
+    const { error: saveError } = await supabase
       .from('blog_articles')
       .update({
         status: 'drafted',
@@ -265,6 +298,7 @@ export async function generateBlogArticle(articleId: string): Promise<BlogAction
         },
       })
       .eq('id', articleId);
+    if (saveError) throw new Error(`Salvataggio dell’articolo fallito: ${saveError.message}`);
 
     await recordAudit({
       organizationId: organization.id,

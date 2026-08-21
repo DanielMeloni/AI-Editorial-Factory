@@ -15,22 +15,59 @@ describe('applicazione delle migration', () => {
   it('crea tutte le tabelle previste', async () => {
     const expected = [
       // Nucleo editoriale (migration 01-12)
-      'agent_definitions', 'agent_runs', 'audit_log', 'chapter_versions', 'chapters',
-      'citations', 'cover_projects', 'exports', 'organization_members', 'organizations',
-      'profiles', 'project_manifests', 'project_sources', 'projects', 'publication_outputs',
-      'publication_parts', 'review_comments', 'review_requests', 'source_chunks',
-      'source_files', 'style_guides', 'usage_events', 'verification_issues', 'visual_assets',
+      'agent_definitions',
+      'agent_runs',
+      'audit_log',
+      'chapter_versions',
+      'chapters',
+      'citations',
+      'cover_projects',
+      'exports',
+      'organization_members',
+      'organizations',
+      'profiles',
+      'project_manifests',
+      'project_sources',
+      'project_volumes',
+      'projects',
+      'publication_outputs',
+      'publication_parts',
+      'review_comments',
+      'review_requests',
+      'source_chunks',
+      'source_files',
+      'style_guides',
+      'usage_events',
+      'verification_issues',
+      'visual_assets',
       'workflow_runs',
       // Collane editoriali (migration 13), in attesa della Fase 8
-      'cross_volume_references', 'series', 'series_assets', 'series_change_impacts',
-      'series_change_proposals', 'series_consistency_issues', 'series_consistency_runs',
-      'series_cover_templates', 'series_members', 'series_release_plans',
-      'series_rule_overrides', 'series_rules', 'series_shared_content_versions',
-      'series_shared_contents', 'series_style_versions', 'series_terms', 'series_volumes',
+      'cross_volume_references',
+      'series',
+      'series_assets',
+      'series_change_impacts',
+      'series_change_proposals',
+      'series_consistency_issues',
+      'series_consistency_runs',
+      'series_cover_templates',
+      'series_members',
+      'series_release_plans',
+      'series_rule_overrides',
+      'series_rules',
+      'series_shared_content_versions',
+      'series_shared_contents',
+      'series_style_versions',
+      'series_terms',
+      'series_volumes',
       // Ricerca automatica delle fonti (migration 15-16)
-      'source_suggestions', 'reference_sources', 'reference_chunks',
+      'source_suggestions',
+      'reference_sources',
+      'reference_chunks',
       // Derivazioni editoriali: corsi e blog
-      'courses', 'course_lessons', 'blog_plans', 'blog_articles',
+      'courses',
+      'course_lessons',
+      'blog_plans',
+      'blog_articles',
     ].sort();
 
     const result = await ctx.db.query<{ tablename: string }>(
@@ -40,7 +77,11 @@ describe('applicazione delle migration', () => {
   });
 
   it('attiva ENABLE e FORCE row level security su ogni tabella esposta', async () => {
-    const result = await ctx.db.query<{ relname: string; relrowsecurity: boolean; relforcerowsecurity: boolean }>(
+    const result = await ctx.db.query<{
+      relname: string;
+      relrowsecurity: boolean;
+      relforcerowsecurity: boolean;
+    }>(
       `select c.relname, c.relrowsecurity, c.relforcerowsecurity
          from pg_class c
          join pg_namespace n on n.oid = c.relnamespace
@@ -104,7 +145,11 @@ describe('applicazione delle migration', () => {
 
 describe('provisioning alla registrazione', () => {
   it('crea profilo, organizzazione personale e appartenenza come proprietario', async () => {
-    const { userId, organizationId } = await createUser(ctx.db, 'daniel@esempio.it', 'Daniel Meloni');
+    const { userId, organizationId } = await createUser(
+      ctx.db,
+      'daniel@esempio.it',
+      'Daniel Meloni',
+    );
 
     const profile = await ctx.db.query<{ full_name: string }>(
       'select full_name from public.profiles where id = $1',

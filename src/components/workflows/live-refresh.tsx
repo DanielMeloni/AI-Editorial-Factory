@@ -58,10 +58,7 @@ export function LiveRefresh({
 
   // --- Canale: aggiornamento immediato quando disponibile -------------------
   useEffect(() => {
-    if (!attiva) {
-      setDalVivo(false);
-      return;
-    }
+    if (!attiva) return;
 
     const supabase = createClient();
     let vivo = true;
@@ -110,7 +107,7 @@ export function LiveRefresh({
   if (!attiva) return null;
 
   return (
-    <p role="status" className="text-xs text-muted-foreground">
+    <p role="status" className="text-muted-foreground text-xs">
       {dalVivo
         ? 'Aggiornamento immediato attivo.'
         : `Aggiornamento ogni ${INTERVALLO_BASE_MS / 1000} secondi.`}
