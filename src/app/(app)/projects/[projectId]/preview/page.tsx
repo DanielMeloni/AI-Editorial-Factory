@@ -21,11 +21,7 @@ import { createClient } from '@/lib/supabase/server';
  * convalidato. Accanto, l'elenco di ciò che è dentro e di ciò che manca —
  * perché la domanda vera davanti a un'anteprima è sempre «cosa non c'è ancora».
  */
-export default async function PreviewPage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function PreviewPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const project = await getProject(projectId);
   if (!project) notFound();
@@ -38,7 +34,10 @@ export default async function PreviewPage({
 
   // Il PDF arriva da una rotta della stessa origine: la Content Security Policy
   // chiude i frame a «self», e servirlo da qui è preferibile ad allargarla.
-  const percorso = `/api/projects/${projectId}/preview`;
+  const versioneAnteprima = anteprima?.completedAt
+    ? encodeURIComponent(anteprima.completedAt)
+    : 'corrente';
+  const percorso = `/api/projects/${projectId}/preview?v=${versioneAnteprima}`;
   const bozze = volume.chapters.filter((capitolo) => !capitolo.approvato).length;
 
   return (
@@ -69,7 +68,7 @@ export default async function PreviewPage({
                   Apri in una scheda
                 </a>
                 <a
-                  href={`${percorso}?download=1`}
+                  href={`${percorso}&download=1`}
                   className={buttonVariants({ variant: 'secondary', size: 'sm' })}
                 >
                   <Download aria-hidden="true" />
@@ -106,7 +105,7 @@ export default async function PreviewPage({
             <iframe
               src={percorso}
               title="Anteprima del volume in PDF"
-              className="h-[80vh] w-full border-0 bg-surface-muted"
+              className="bg-surface-muted h-[80vh] w-full border-0"
             />
           </Card>
         ) : (
@@ -124,19 +123,19 @@ export default async function PreviewPage({
           </CardHeader>
           <CardContent className="p-0">
             {volume.chapters.length === 0 ? (
-              <p className="px-5 pb-5 text-sm text-muted-foreground">
+              <p className="text-muted-foreground px-5 pb-5 text-sm">
                 Nessun capitolo scritto, per ora.
               </p>
             ) : (
-              <ul className="divide-y divide-border-subtle">
+              <ul className="divide-border-subtle divide-y">
                 {volume.chapters.map((capitolo) => (
                   <li key={capitolo.id} className="flex flex-wrap items-baseline gap-2 px-5 py-2.5">
-                    <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">
+                    <span className="text-muted-foreground w-28 shrink-0 text-xs font-medium">
                       {etichettaCapitolo(capitolo)}
                     </span>
                     <Link
                       href={`/projects/${projectId}/chapters/${capitolo.id}`}
-                      className="min-w-0 flex-1 text-sm font-medium text-foreground hover:text-primary hover:underline"
+                      className="text-foreground hover:text-primary min-w-0 flex-1 text-sm font-medium hover:underline"
                     >
                       {capitolo.title}
                     </Link>

@@ -139,8 +139,15 @@ export async function rebuildVolumePreviewWith(
     completed_at: adesso,
   };
 
-  if (esistente) await supabase.from('exports').update(riga).eq('id', esistente.id);
-  else await supabase.from('exports').insert({ ...riga, requested_at: adesso });
+  const { error: exportError } = esistente
+    ? await supabase.from('exports').update(riga).eq('id', esistente.id)
+    : await supabase.from('exports').insert({ ...riga, requested_at: adesso });
+  if (exportError) {
+    return {
+      ok: false,
+      message: `Registrazione dell’anteprima non riuscita: ${exportError.message}`,
+    };
+  }
 
   return {
     ok: true,

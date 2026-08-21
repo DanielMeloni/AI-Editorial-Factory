@@ -86,7 +86,7 @@ export async function composeVolume(
     return { chapters: [], totals: { chapters: 0, words: 0 }, pending };
   }
 
-  const { data: versioni } = await supabase
+  const { data: versioni, error: versioniError } = await supabase
     .from('chapter_versions')
     .select('id, chapter_id, content_md, version_no, word_count, parent_version_id')
     .in(
@@ -103,6 +103,8 @@ export async function composeVolume(
         parent_version_id: string | null;
       }[]
     >();
+
+  if (versioniError) throw new Error(`Lettura delle versioni fallita: ${versioniError.message}`);
 
   const perId = new Map((versioni ?? []).map((versione) => [versione.id, versione]));
 
@@ -121,6 +123,18 @@ export async function composeVolume(
     ) {
       visitati.add(versione.id);
       versione = perId.get(versione.parent_version_id);
+    }
+    // Anche una catena storica può essere spezzata. In quel caso scegliamo la
+    // versione completa più recente dello stesso capitolo, mai il memorandum.
+    if (!versione || sembraPromemoriaDiRevisione(versione.content_md)) {
+      versione = (versioni ?? [])
+        .filter(
+          (candidata) =>
+            candidata.chapter_id === capitolo.id &&
+            candidata.content_md.trim() !== '' &&
+            !sembraPromemoriaDiRevisione(candidata.content_md),
+        )
+        .sort((a, b) => b.version_no - a.version_no)[0];
     }
     if (!versione || versione.content_md.trim() === '') {
       pending.push({ title: capitolo.title, status: capitolo.status });
@@ -152,7 +166,7 @@ export async function composeVolume(
 
 function sembraPromemoriaDiRevisione(contentMd: string): boolean {
   const istruzioni =
-    contentMd.match(/^(?:sostituisci|aggiungi|rimuovi|correggi)\b/gim)?.length ?? 0;
+    contentMd.match(/^\s*(?:[-*>]\s*)?(?:sostituisci|aggiungi|rimuovi|correggi)\b/gim)?.length ?? 0;
   return /(^|\n)#{1,3}\s+revisioni proposte\b/i.test(contentMd) && istruzioni >= 2;
 }
 

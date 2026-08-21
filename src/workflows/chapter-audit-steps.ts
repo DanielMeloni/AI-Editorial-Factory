@@ -1024,7 +1024,7 @@ export async function proposeRevision(
 
 function sembraPromemoriaDiRevisione(contentMd: string): boolean {
   const istruzioni =
-    contentMd.match(/^(?:sostituisci|aggiungi|rimuovi|correggi)\b/gim)?.length ?? 0;
+    contentMd.match(/^\s*(?:[-*>]\s*)?(?:sostituisci|aggiungi|rimuovi|correggi)\b/gim)?.length ?? 0;
   return /(^|\n)#{1,3}\s+revisioni proposte\b/i.test(contentMd) && istruzioni >= 2;
 }
 
