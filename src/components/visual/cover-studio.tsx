@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Ruler, Save, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
@@ -28,6 +28,7 @@ import type { CoverArtworkRow, CoverRow } from '@/lib/visual/queries';
 
 export function CoverStudio({
   projectId,
+  volumeId,
   cover,
   artwork,
   references,
@@ -35,11 +36,15 @@ export function CoverStudio({
   defaults,
 }: {
   projectId: string;
+  volumeId: string | null;
   cover: CoverRow | null;
   artwork: CoverArtworkRow[];
   references: CoverArtworkRow[];
   logo: CoverArtworkRow | null;
-  defaults: { title: string; subtitle: string | null; author: string };
+  defaults: {
+    title: string; subtitle: string | null; author: string;
+    seriesName: string | null; volumeLabel: string | null;
+  };
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -83,13 +88,20 @@ export function CoverStudio({
       const scelto = artwork.find(({ asset }) => asset.id === selezione[kind]);
       return scelto?.signedUrl ?? null;
     };
-    return { front: per('cover_front'), spine: per('cover_spine'), back: per('cover_back') };
+    return {
+      // Il preset è un vero fondo editoriale, non un pannello piatto. Appena
+      // si prova o approva una generazione, l'asset del volume lo sostituisce.
+      front: per('cover_front') ?? '/cover-presets/technical-series-front.png',
+      spine: per('cover_spine'),
+      back: per('cover_back') ?? '/cover-presets/technical-series-back.png',
+    };
   }, [artwork, selezione]);
 
-  const [titolo, setTitolo] = useState(cover?.title || defaults.title);
-  const [sottotitolo, setSottotitolo] = useState(cover?.subtitle ?? defaults.subtitle ?? '');
+  // La configurazione del manuale/volume è la fonte di verità dei testi.
+  const titolo = defaults.title;
+  const sottotitolo = defaults.subtitle ?? '';
   const [autore, setAutore] = useState(cover?.author || defaults.author);
-  const [collana, setCollana] = useState(cover?.series_name ?? '');
+  const [collana, setCollana] = useState(cover?.series_name ?? defaults.seriesName ?? '');
   const [quarta, setQuarta] = useState(cover?.back_description ?? '');
   const [bio, setBio] = useState(cover?.biography ?? '');
   const [isbn, setIsbn] = useState(cover?.isbn ?? '');
@@ -138,6 +150,7 @@ export function CoverStudio({
           subtitle: sottotitolo || null,
           author: autore,
           seriesName: collana || null,
+          volumeLabel: defaults.volumeLabel,
           backDescription: quarta || null,
           biography: bio || null,
         },
@@ -148,16 +161,28 @@ export function CoverStudio({
         },
       ),
     };
-  }, [trimW, trimH, spineMm, bleed, safety, titolo, sottotitolo, autore, collana, quarta, bio, grafiche, logo]);
+  }, [trimW, trimH, spineMm, bleed, safety, titolo, sottotitolo, autore, collana, quarta, bio, grafiche, logo, defaults.volumeLabel]);
 
   function generaGrafica() {
     startTransition(async () => {
-      const esito = await generateCoverArtwork(projectId);
+      const esito = await generateCoverArtwork(projectId, volumeId);
       if (esito.ok) toast.success(esito.message);
       else toast.error(esito.message);
       router.refresh();
     });
   }
+
+  const avvioCopertina = useRef(false);
+  useEffect(() => {
+    if (cover || artwork.length > 0 || avvioCopertina.current) return;
+    avvioCopertina.current = true;
+    startTransition(async () => {
+      const esito = await generateCoverArtwork(projectId, volumeId);
+      if (esito.ok) toast.success('Copertina iniziale generata dai dati del manuale.');
+      else toast.error(esito.message);
+      router.refresh();
+    });
+  }, [artwork.length, cover, projectId, router, volumeId]);
 
   function salva() {
     startTransition(async () => {
@@ -312,15 +337,16 @@ export function CoverStudio({
             <CardTitle className="text-sm">Testi</CardTitle>
             <CardDescription>
               Composti programmaticamente sopra l’immagine, non generati dentro di essa: solo così
-              restano leggibili e verificabili.
+              restano leggibili e verificabili. Titolo e sottotitolo provengono dalla configurazione
+              del manuale selezionato.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <Field id="titolo" label="Titolo" required>
-              {({ id }) => <Input id={id} value={titolo} onChange={(e) => setTitolo(e.target.value)} />}
+              {({ id }) => <Input id={id} value={titolo} readOnly />}
             </Field>
             <Field id="sottotitolo" label="Sottotitolo">
-              {({ id }) => <Input id={id} value={sottotitolo} onChange={(e) => setSottotitolo(e.target.value)} />}
+              {({ id }) => <Input id={id} value={sottotitolo} readOnly />}
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field id="autore" label="Autore" required>
@@ -418,16 +444,16 @@ export function CoverStudio({
             {pending ? 'Salvataggio…' : 'Salva copertina'}
           </Button>
 
-          <Button variant="secondary" disabled={pending || !cover} onClick={generaGrafica}>
+          <Button variant="secondary" disabled={pending} onClick={generaGrafica}>
             <Sparkles aria-hidden="true" />
             {pending ? 'Generazione…' : 'Genera la grafica'}
           </Button>
         </div>
 
-        {!cover ? (
+        {!cover && !pending ? (
           <p className="text-xs text-muted-foreground">
-            La generazione si abilita dopo il primo salvataggio: le grafiche si agganciano alle
-            specifiche della copertina.
+            La copertina iniziale viene creata automaticamente usando titolo, sottotitolo e
+            metadati del volume corrente.
           </p>
         ) : null}
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, Copy, Eye, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -42,6 +42,7 @@ export function AssetCard({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [erroreImmagine, setErroreImmagine] = useState(false);
 
   const stato = STATO[asset.status as keyof typeof STATO] ?? STATO.draft;
   const daDecidere = asset.status === 'pending_approval';
@@ -58,12 +59,13 @@ export function AssetCard({
   return (
     <Card className="flex h-full flex-col">
       <div className="flex aspect-[4/3] items-center justify-center overflow-hidden rounded-t-card border-b border-border-subtle bg-surface-muted">
-        {signedUrl ? (
+        {signedUrl && !erroreImmagine ? (
           // eslint-disable-next-line @next/next/no-img-element -- URL firmato a scadenza: l'ottimizzatore di Next non può memorizzarlo
           <img
             src={signedUrl}
             alt={asset.alt_text ?? asset.caption ?? 'Illustrazione generata'}
             className="size-full object-cover"
+            onError={() => setErroreImmagine(true)}
           />
         ) : asset.mermaid_source ? (
           <MermaidDiagram
@@ -73,7 +75,9 @@ export function AssetCard({
             className="size-full overflow-auto p-2 [&>div]:border-0 [&>div]:bg-transparent"
           />
         ) : (
-          <span className="text-xs text-muted-foreground">Anteprima non disponibile</span>
+          <span className="px-4 text-center text-xs text-muted-foreground">
+            {erroreImmagine ? 'Immagine non caricabile: verifica Storage.' : 'Anteprima non disponibile'}
+          </span>
         )}
       </div>
 

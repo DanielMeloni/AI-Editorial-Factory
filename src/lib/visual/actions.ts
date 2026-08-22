@@ -421,10 +421,15 @@ const PARTI = [
     etichetta: 'fronte',
     /** Il fronte è ciò che si vede in vetrina: immagine sola, senza testo. */
     intento:
-      'Immagine di copertina per un manuale tecnico. Composizione verticale, ' +
-      'soggetto centrale forte, ampio spazio libero nella metà superiore dove verranno ' +
-      'composti titolo e sottotitolo, e fascia inferiore quieta e scura dove verranno ' +
-      'composti autore e logo dello strumento.',
+      'Fondo illustrato per il fronte di un manuale tecnico della collana. ' +
+      'Riprendi la struttura editoriale dei riferimenti: simmetria forte, ampi margini e una ' +
+      'gerarchia verticale molto leggibile. Lascia il 45% superiore quasi nero, pulito e con ' +
+      'contrasto uniforme per autore, titolo monumentale con padding, ' +
+      'badge del volume e sottotitolo. Nel 55% inferiore crea una griglia prospettica con un ' +
+      'grande emblema esagonale astratto al centro, appoggiato su un plinto luminoso, e quattro ' +
+      'moduli satelliti simmetrici collegati da linee sottili. Ogni modulo evoca un concetto ' +
+      'del manuale con un pittogramma semplice, senza parole. Lascia quieta e simmetrica la fascia ' +
+      'inferiore per un logo centrato.',
   },
   {
     kind: 'cover_spine' as const,
@@ -439,8 +444,11 @@ const PARTI = [
     campo: 'back_asset_id' as const,
     etichetta: 'quarta',
     intento:
-      'Sfondo per la quarta di copertina: variazione più quieta e scura della stessa ' +
-      'immagine di fronte, con ampie superfici uniformi su cui il testo resti leggibile.',
+      'Fondo per la quarta di copertina perfettamente coordinato con il fronte: quasi nero, stessa ' +
+      'palette e stessi margini. Mantieni il 60% superiore e centrale uniforme per titolo, badge ' +
+      'volume, descrizione e moduli editoriali composti successivamente. Confina la griglia ' +
+      'prospettica, i bagliori e le particelle nella metà inferiore. Nessun testo, logo o grande ' +
+      'soggetto; lascia una fascia calma in basso per il logo centrato.',
   },
 ];
 
@@ -455,7 +463,10 @@ const PARTI = [
  *
  * Le tre immagini nascono in attesa di approvazione, come ogni altro asset.
  */
-export async function generateCoverArtwork(projectId: string): Promise<VisualActionResult> {
+export async function generateCoverArtwork(
+  projectId: string,
+  volumeId: string | null = null,
+): Promise<VisualActionResult> {
   const user = await requireUser();
   const organization = await requireOrganization();
 
@@ -467,18 +478,31 @@ export async function generateCoverArtwork(projectId: string): Promise<VisualAct
 
   const { data: project } = await supabase
     .from('projects')
-    .select('id, organization_id, title, subtitle, description')
+    .select('id, organization_id, title, subtitle, description, author')
     .eq('id', projectId)
     .maybeSingle<{
       id: string; organization_id: string; title: string;
-      subtitle: string | null; description: string | null;
+      subtitle: string | null; description: string | null; author: string;
     }>();
 
   if (!project || project.organization_id !== organization.id) {
     return { ok: false, message: 'Progetto non trovato.' };
   }
 
-  const { data: cover } = await supabase
+  let volumeQuery = supabase
+    .from('project_volumes')
+    .select('id, title, subtitle, target_pages, volume_number')
+    .eq('project_id', projectId);
+  if (volumeId) volumeQuery = volumeQuery.eq('id', volumeId);
+  const { data: volume } = await volumeQuery
+    .order('volume_number')
+    .limit(1)
+    .maybeSingle<{
+      id: string; title: string; subtitle: string | null;
+      target_pages: number | null; volume_number: number;
+    }>();
+
+  let { data: cover } = await supabase
     .from('cover_projects')
     .select('id, trim_width_mm, trim_height_mm, spine_width_mm, title, subtitle, back_description, series_name')
     .eq('project_id', projectId)
@@ -488,13 +512,38 @@ export async function generateCoverArtwork(projectId: string): Promise<VisualAct
       title: string; subtitle: string | null; back_description: string | null; series_name: string | null;
     }>();
 
-  // Le tre grafiche si agganciano alla copertina: senza, non avrebbero dove
-  // essere registrate e resterebbero asset sciolti.
+  let creataAutomaticamente = false;
   if (!cover) {
-    return {
-      ok: false,
-      message: 'Salva prima la copertina: le grafiche si agganciano alle sue specifiche.',
-    };
+    const { data: nuova, error: createError } = await supabase
+      .from('cover_projects')
+      .insert({
+        project_id: projectId,
+        organization_id: organization.id,
+        trim_width_mm: 170,
+        trim_height_mm: 240,
+        bleed_mm: 3,
+        safety_margin_mm: 5,
+        page_count: volume?.target_pages ?? null,
+        title: volume?.title || project.title,
+        subtitle: volume?.subtitle ?? project.subtitle,
+        author: project.author,
+        series_name: null,
+        back_description: project.description,
+        created_by: user.id,
+      })
+      .select('id, trim_width_mm, trim_height_mm, spine_width_mm, title, subtitle, back_description, series_name')
+      .single<typeof cover>();
+    if (createError || !nuova) {
+      return { ok: false, message: `Creazione della copertina iniziale fallita: ${createError?.message ?? ''}` };
+    }
+    cover = nuova;
+    creataAutomaticamente = true;
+  } else if (volume) {
+    await supabase
+      .from('cover_projects')
+      .update({ title: volume.title, subtitle: volume.subtitle, page_count: volume.target_pages })
+      .eq('id', cover.id);
+    cover = { ...cover, title: volume.title, subtitle: volume.subtitle };
   }
 
   // Il dorso dipende dal numero definitivo di pagine, che a manuale in corso
@@ -552,6 +601,7 @@ export async function generateCoverArtwork(projectId: string): Promise<VisualAct
   // arriva dal preset di brand, lo stesso che tinge l'anteprima e i corsi.
   const soggetto = [
     `Manuale tecnico intitolato «${cover.title || project.title}».`,
+    volume?.volume_number ? `È il volume ${volume.volume_number} della collana.` : '',
     cover.subtitle || project.subtitle ? `Sottotitolo: ${cover.subtitle ?? project.subtitle}.` : '',
     project.description ? `Argomento: ${project.description.slice(0, 600)}.` : '',
     cover.series_name ? `Collana: ${cover.series_name}.` : '',
@@ -649,7 +699,21 @@ export async function generateCoverArtwork(projectId: string): Promise<VisualAct
 
   // La generazione propone e basta: l'aggancio alla copertina avviene
   // all'approvazione, che è il momento in cui una persona ha guardato.
-  // Generare non è scegliere.
+  // Generare non è scegliere. Fa eccezione soltanto la prima copertina
+  // automatica: serve un risultato completo immediato, che resta modificabile
+  // e può essere sostituito dalle proposte successive.
+  if (creataAutomaticamente && generati.length > 0) {
+    const ora = new Date().toISOString();
+    await supabase
+      .from('visual_assets')
+      .update({ status: 'approved', approved_at: ora, approved_by: user.id })
+      .in('id', generati.map((item) => item.assetId));
+
+    const collegamenti = Object.fromEntries(
+      generati.map((item) => [item.campo, item.assetId]),
+    );
+    await supabase.from('cover_projects').update(collegamenti).eq('id', cover.id);
+  }
 
   await recordAudit({
     organizationId: organization.id,
@@ -666,7 +730,9 @@ export async function generateCoverArtwork(projectId: string): Promise<VisualAct
     ok: true,
     assetId: generati[0]?.assetId,
     message: [
-      `${generati.length} grafiche proposte${basi.length > 0 ? ` da ${basi.length} riferiment${basi.length === 1 ? 'o' : 'i'}` : ' senza riferimenti visivi'} (${costo > 0 ? `$${costo.toFixed(4)}` : 'costo non stimato'}): selezionale per vederle in anteprima, approvale per applicarle.`,
+      creataAutomaticamente
+        ? `Copertina iniziale generata e applicata con titolo «${cover.title}»${cover.subtitle ? ` e sottotitolo «${cover.subtitle}»` : ''}.`
+        : `${generati.length} grafiche proposte${basi.length > 0 ? ` da ${basi.length} riferiment${basi.length === 1 ? 'o' : 'i'}` : ' senza riferimenti visivi'} (${costo > 0 ? `$${costo.toFixed(4)}` : 'costo non stimato'}): selezionale per vederle in anteprima, approvale per applicarle.`,
       ...(dorsoPronto
         ? []
         : [

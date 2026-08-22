@@ -101,6 +101,7 @@ export interface CoverTexts {
   subtitle?: string | null;
   author: string;
   seriesName?: string | null;
+  volumeLabel?: string | null;
   backDescription?: string | null;
   biography?: string | null;
   priceLabel?: string | null;
@@ -170,35 +171,54 @@ export function buildCoverPreviewSvg(
 
   // --- Fronte -------------------------------------------------------------
   const f = layout.frontSafe;
+  const centroFronte = f.x + f.width / 2;
   if (texts.seriesName) {
     parti.push(
       // Maiuscolo prima della neutralizzazione: `&amp;` reso maiuscolo
       // diventerebbe `&AMP;`, che non è più un'entità XML valida.
-      text(f.x, f.y + 6, esc(texts.seriesName.toUpperCase()), {
-        size: 3.6, weight: '600', fill: COVER_TEXT_COLORS.series, letterSpacing: 0.9,
+      text(centroFronte, f.y + 5, esc(texts.seriesName.toUpperCase()), {
+        size: 3.2, weight: '600', fill: COVER_TEXT_COLORS.series, letterSpacing: 0.8, anchor: 'middle',
       }),
     );
   }
-  // Il filetto blu sopra il titolo è l'unico segno grafico composto: separa il
-  // titolo da qualunque immagine ci finisca sotto, e ripete l'accento del sito.
   parti.push(
-    `<rect x="${round2(f.x)}" y="${round2(f.y + f.height * 0.32 - 9)}" width="24" height="0.9" ` +
-      `fill="${COVER_TEXT_COLORS.rule}"/>`,
-    ...wrapText(esc(texts.title), f.x, f.y + f.height * 0.32, f.width, {
-      size: 9, weight: '700', fill: COVER_TEXT_COLORS.title, lineHeight: 11,
+    text(centroFronte, f.y + 13, esc(texts.author.toUpperCase()), {
+      size: 5.2, weight: '700', fill: COVER_TEXT_COLORS.author, letterSpacing: 1.2, anchor: 'middle',
     }),
   );
+
+  const righeTitolo = wrapText(
+    esc(texts.title.toUpperCase()), centroFronte, f.y + 35, f.width * 0.86, {
+      size: 13.5, weight: '800', fill: COVER_TEXT_COLORS.title,
+      lineHeight: 14.5, maxLines: 3, anchor: 'middle',
+    },
+  );
+  const dopoTitolo = f.y + 35 + (righeTitolo.length - 1) * 14.5;
+  parti.push(
+    ...righeTitolo,
+  );
+  let ySottotitolo = dopoTitolo + 10;
+  if (texts.volumeLabel) {
+    const badgeW = Math.min(58, Math.max(34, texts.volumeLabel.length * 4));
+    parti.push(
+      `<line x1="${round2(centroFronte - badgeW / 2 - 18)}" y1="${round2(dopoTitolo + 6)}" x2="${round2(centroFronte - badgeW / 2 - 4)}" y2="${round2(dopoTitolo + 6)}" stroke="${COVER_TEXT_COLORS.rule}" stroke-width="0.6"/>`,
+      `<rect x="${round2(centroFronte - badgeW / 2)}" y="${round2(dopoTitolo + 0.5)}" width="${round2(badgeW)}" height="10" rx="5" fill="${BRAND_PALETTE.blue}"/>`,
+      text(centroFronte, dopoTitolo + 7.4, esc(texts.volumeLabel.toUpperCase()), {
+        size: 4.3, weight: '800', fill: BRAND_PALETTE.textPrimary, letterSpacing: 0.7, anchor: 'middle',
+      }),
+      `<line x1="${round2(centroFronte + badgeW / 2 + 4)}" y1="${round2(dopoTitolo + 6)}" x2="${round2(centroFronte + badgeW / 2 + 18)}" y2="${round2(dopoTitolo + 6)}" stroke="${COVER_TEXT_COLORS.rule}" stroke-width="0.6"/>`,
+    );
+    ySottotitolo = dopoTitolo + 18;
+  }
   if (texts.subtitle) {
     parti.push(
-      ...wrapText(esc(texts.subtitle), f.x, f.y + f.height * 0.32 + 16, f.width, {
-        size: 4.6, weight: '400', fill: COVER_TEXT_COLORS.subtitle, lineHeight: 6,
+      ...wrapText(esc(texts.subtitle), centroFronte, ySottotitolo, f.width * 0.92, {
+        size: 4.4, weight: '600', fill: COVER_TEXT_COLORS.subtitle,
+        lineHeight: 5.6, maxLines: 4, anchor: 'middle',
       }),
     );
   }
   parti.push(
-    text(f.x, f.y + f.height - 2, esc(texts.author), {
-      size: 5.2, weight: '600', fill: COVER_TEXT_COLORS.author,
-    }),
     // Il logo sta in basso a destra, sulla stessa riga dell'autore: è il posto
     // in cui un lettore cerca «di che cosa parla», ed è fuori dalla zona in cui
     // cade il titolo.
@@ -218,11 +238,31 @@ export function buildCoverPreviewSvg(
 
   // --- Quarta di copertina ------------------------------------------------
   const b = layout.backSafe;
-  let cursore = b.y + 8;
+  const centroRetro = b.x + b.width / 2;
+  const titoloRetro = wrapText(esc(texts.title.toUpperCase()), centroRetro, b.y + 16, b.width * 0.86, {
+    size: 10, weight: '800', fill: COVER_TEXT_COLORS.title,
+    lineHeight: 10.5, maxLines: 3, anchor: 'middle',
+  });
+  parti.push(...titoloRetro);
+  let cursore = b.y + 16 + titoloRetro.length * 10.5;
+  if (texts.volumeLabel) {
+    parti.push(text(centroRetro, cursore, esc(texts.volumeLabel.toUpperCase()), {
+      size: 4, weight: '800', fill: COVER_TEXT_COLORS.heading, letterSpacing: 0.7, anchor: 'middle',
+    }));
+    cursore += 8;
+  }
+  if (texts.subtitle) {
+    parti.push(...wrapText(esc(texts.subtitle.toUpperCase()), centroRetro, cursore, b.width, {
+      size: 4.2, weight: '700', fill: COVER_TEXT_COLORS.heading,
+      lineHeight: 5.2, maxLines: 3, anchor: 'middle',
+    }));
+    cursore += 18;
+  }
 
   if (texts.backDescription) {
-    const righe = wrapText(esc(texts.backDescription), b.x, cursore, b.width, {
-      size: 3.4, weight: '400', fill: COVER_TEXT_COLORS.body, lineHeight: 4.6, maxLines: 14,
+    const righe = wrapText(esc(texts.backDescription), centroRetro, cursore, b.width * 0.94, {
+      size: 3.4, weight: '400', fill: COVER_TEXT_COLORS.body,
+      lineHeight: 4.6, maxLines: 12, anchor: 'middle',
     });
     parti.push(...righe);
     cursore += righe.length * 4.6 + 6;
@@ -236,6 +276,7 @@ export function buildCoverPreviewSvg(
       }),
     );
   }
+  parti.push(logo(b, options.logoHref));
 
   // --- Guide di stampa ----------------------------------------------------
   if (guides) {
@@ -290,7 +331,7 @@ function velatura(rect: Rect, href: string | null | undefined, opacita: number):
 }
 
 /**
- * Logo dello strumento, in basso a destra sul fronte.
+ * Logo dello strumento, centrato in basso come elemento di chiusura.
  *
  * `meet` invece di `slice`: un marchio non si ritaglia. Se le proporzioni non
  * coincidono resta dello spazio, che è sempre preferibile a un logo tagliato.
@@ -299,13 +340,13 @@ function logo(frontSafe: Rect, href: string | null | undefined): string {
   if (!href) return '';
 
   const altezza = Math.min(13, frontSafe.height * 0.07);
-  const larghezza = Math.min(frontSafe.width * 0.38, altezza * 3.4);
-  const x = round2(frontSafe.x + frontSafe.width - larghezza);
+  const larghezza = Math.min(frontSafe.width * 0.46, altezza * 3.8);
+  const x = round2(frontSafe.x + (frontSafe.width - larghezza) / 2);
   const y = round2(frontSafe.y + frontSafe.height - altezza - 1);
 
   return (
     `<image href="${esc(href)}" x="${x}" y="${y}" width="${round2(larghezza)}" ` +
-    `height="${round2(altezza)}" preserveAspectRatio="xMaxYMax meet"/>`
+    `height="${round2(altezza)}" preserveAspectRatio="xMidYMax meet"/>`
   );
 }
 

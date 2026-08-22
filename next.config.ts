@@ -1,6 +1,16 @@
 import type { NextConfig } from 'next';
 import { withWorkflow } from 'workflow/next';
 
+const supabaseOrigin = (() => {
+  try {
+    return process.env.NEXT_PUBLIC_SUPABASE_URL
+      ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin
+      : null;
+  } catch {
+    return null;
+  }
+})();
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
@@ -46,7 +56,7 @@ const nextConfig: NextConfig = {
         "default-src 'self'",
         "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
         "style-src 'self' 'unsafe-inline'",
-        "img-src 'self' data: blob: https://*.supabase.co",
+        `img-src 'self' data: blob: https://*.supabase.co${supabaseOrigin ? ` ${supabaseOrigin}` : ''}`,
         "font-src 'self' data:",
         "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
         "object-src 'none'",

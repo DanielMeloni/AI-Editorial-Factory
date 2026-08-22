@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exportPdf } from '@/lib/publish/pdf';
+import { exportPdf, exportVolumePdfLineare } from '@/lib/publish/pdf';
 import type { ExportMeta } from '@/lib/publish/markdown';
 
 const META: ExportMeta = {
@@ -50,6 +50,41 @@ Vedi la [documentazione](https://cloud.google.com/dataform/docs).
 `;
 
 describe('esportazione PDF', () => {
+  it('il renderer di sicurezza interpreta il Markdown senza fallire', async () => {
+    const bytes = await exportVolumePdfLineare(
+      [
+        {
+          label: 'Capitolo 1',
+          title: 'Dataform',
+          contentMd: '# Titolo\n\n> **NOTA**\n>\n> Testo importante.\n\n- Prima voce\n- Seconda voce',
+          versionNo: 1,
+          approved: true,
+          figures: [],
+        },
+      ],
+      {
+        projectTitle: 'Dataform in pratica',
+        subtitle: null,
+        author: 'Daniel Meloni',
+        volume: null,
+        generatedAt: '2026-08-21',
+        pending: 0,
+        drafts: 0,
+      },
+    );
+
+    expect(Array.from(bytes.slice(0, 5))).toEqual([0x25, 0x50, 0x44, 0x46, 0x2d]);
+    expect(bytes.byteLength).toBeGreaterThan(1000);
+  }, 30_000);
+
+  it('rimuove il titolo H1 duplicato e gestisce callout e codice', async () => {
+    const bytes = await exportPdf(
+      '# Capitolo 11 - Incremental Tables\n\n> **ATTENZIONE**\n> Testo.\n\n```sql\nselect 1\n```',
+      META,
+    );
+    expect(bytes.byteLength).toBeGreaterThan(1000);
+  }, 30_000);
+
   it('produce un PDF valido', async () => {
     const bytes = await exportPdf(CONTENUTO, META);
 

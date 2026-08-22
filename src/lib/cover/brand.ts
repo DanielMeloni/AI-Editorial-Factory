@@ -83,18 +83,23 @@ export const BRAND_SCRIM = BRAND_PALETTE.inkDeep;
  * descrive il registro del sito senza nominarlo: un modello non può visitarlo.
  */
 export const BRAND_ART_DIRECTION = [
-  'Illustrazione digitale tecnica su fondo blu notte quasi nero.',
-  'Soggetto isometrico dalle geometrie pulite — esagoni, nodi collegati, piani sovrapposti,',
-  'linee di circuito sottili, reticoli di punti — illuminato da dentro con blu elettrico e ciano.',
-  'Luce fredda e direzionale, bagliore che si spegne nel fondo, ampie superfici scure e uniformi.',
-  'Nitido, sobrio, professionale: lo strumento di lavoro di un ingegnere dei dati, non fantascienza.',
+  'Sistema editoriale premium e coerente per una collana di manuali tecnici verticali ad alto contrasto.',
+  'Fondo quasi nero con una lieve sfumatura nel colore caratteristico dello strumento.',
+  'Composizione rigorosamente centrata e simmetrica, con margini esterni ampi e costanti.',
+  'Il 45% superiore resta scuro, pulito e uniforme: è riservato alla tipografia monumentale, al badge',
+  'del volume e al sottotitolo che verranno composti in seguito con vero testo e padding generoso.',
+  'Il 55% inferiore usa una griglia prospettica luminosa: grande emblema esagonale centrale su un plinto',
+  'tecnologico, collegato con linee sottili a quattro moduli quadrati o esagonali con icone concettuali.',
+  'Lascia una fascia calma e centrata in basso per il logo dello strumento composto successivamente.',
+  'Geometrie 3D pulite, bordi neon controllati, particelle puntuali rade e gerarchia visiva immediata.',
+  'Aspetto da copertina editoriale professionale: autorevole, didattico, nitido, non cinematografico.',
 ].join(' ');
 
 /** La gamma cromatica, dichiarata al modello con i valori esatti. */
 export const BRAND_PALETTE_PROMPT =
-  `Palette obbligatoria: fondi ${BRAND_PALETTE.ink} e ${BRAND_PALETTE.navy}, ` +
-  `luci blu elettrico ${BRAND_PALETTE.blue} e ${BRAND_PALETTE.blueBright}, ` +
-  `accenti ciano ${BRAND_PALETTE.cyan}. Nessun altro colore dominante.`;
+  `Base obbligatoria: fondi ${BRAND_PALETTE.inkDeep} e ${BRAND_PALETTE.ink}. ` +
+  `Se è presente un riferimento o logo, ricavane un solo colore caratteristico per luci, bordi e accenti; ` +
+  `altrimenti usa blu elettrico ${BRAND_PALETTE.blue}, ${BRAND_PALETTE.blueBright} e ciano ${BRAND_PALETTE.cyan}.`;
 
 /**
  * Ciò che non deve comparire.
@@ -108,9 +113,8 @@ export const BRAND_NEGATIVE_PROMPT = [
   'loghi, marchi e simboli aziendali riconoscibili',
   'volti, persone, mani',
   'fondo bianco o chiaro',
-  'colori caldi dominanti (arancione, rosso, giallo)',
   'stile fumetto, acquerello, schizzo a mano',
-  'composizioni affollate, elementi tagliati ai bordi',
+  'fotorealismo, persone, paesaggi, composizioni casuali o affollate, elementi tagliati ai bordi',
 ].join(', ');
 
 /**

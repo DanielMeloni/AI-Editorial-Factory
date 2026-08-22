@@ -731,7 +731,13 @@ const CONVENZIONI =
   'pratica, IMPORTANTE fissa un concetto, ATTENZIONE segnala un errore comune o un rischio.\n' +
   '- I segnaposto dei valori da sostituire sono in MAIUSCOLO_UNDERSCORE, come PROJECT_ID.\n' +
   '- Le figure si dichiarano con «[IMMAGINE: descrizione di cosa deve mostrare]» seguito da una ' +
-  'didascalia «Figura N.x – titolo». L’immagine non si descrive a parole nel testo corrente.\n' +
+  'didascalia «Figura N.x – titolo». La descrizione specifica anche il tipo (diagramma di flusso, ' +
+  'architettura, sequenza, confronto o illustrazione) e gli elementi essenziali da rappresentare. ' +
+  'L’immagine non si descrive a parole nel testo corrente.\n' +
+  '- Usa un diagramma di flusso per processi, decisioni e percorsi con più passaggi; usa ' +
+  'un’illustrazione soltanto quando una rappresentazione concettuale chiarisce meglio del testo. ' +
+  'Ogni figura deve avere uno scopo didattico preciso, essere richiamata nel punto pertinente e ' +
+  'non duplicare una tabella o un elenco già sufficienti.\n' +
   '- Il caso di studio è l’e-commerce NordShop: progetto dataform-nordshop-lab, repository ' +
   'nordshop-analytics, dataset raw, analytics e sandbox, tabelle raw.customers, raw.products, ' +
   'raw.orders, raw.order_items. Non sono segnaposto: sono i nomi concreti da usare.\n' +
@@ -750,7 +756,7 @@ export const chapterPlanAgent: AgentDefinition<ChapterDraftInput, ChapterPlanOut
   key: 'technical_writer',
   name: 'Chapter Planner',
   version: 1,
-  promptVersion: 'v1',
+  promptVersion: 'v2',
   inputSchema: chapterDraftInputSchema,
   outputSchema: chapterPlanOutputSchema,
   maxOutputTokens: 4000,
@@ -784,6 +790,11 @@ export const chapterPlanAgent: AgentDefinition<ChapterDraftInput, ChapterPlanOut
       '',
       'Progetta da 4 a 8 sezioni di corpo. Non includere riassunto, punti chiave, quiz, ' +
         'laboratorio o riferimenti: sono apparato e vengono composti a parte.',
+      'Distribuisci nel capitolo da 2 a 4 sezioni con `needsFigure: true`, quando il materiale lo ' +
+        'consente. Scegli i punti in cui una figura riduce davvero il carico cognitivo: flussi per ' +
+        'processi o decisioni, sequenze per interazioni temporali, architetture per componenti e ' +
+        'illustrazioni per concetti difficili da immaginare. Non concentrare tutte le figure in una ' +
+        'sola parte e non usarle come decorazione.',
     ]
       .filter(Boolean)
       .join('\n'),
@@ -816,7 +827,7 @@ export const chapterSectionAgent: AgentDefinition<ChapterSectionInput, ChapterSe
   key: 'technical_writer',
   name: 'Chapter Section Writer',
   version: 1,
-  promptVersion: 'v1',
+  promptVersion: 'v2',
   inputSchema: chapterSectionInputSchema as unknown as z.ZodType<ChapterSectionInput>,
   outputSchema: chapterSectionOutputSchema,
   maxOutputTokens: 8000,
@@ -849,7 +860,11 @@ export const chapterSectionAgent: AgentDefinition<ChapterSectionInput, ChapterSe
         ? 'Questa sezione richiede almeno un blocco di codice completo ed eseguibile, con il linguaggio dichiarato.'
         : '',
       input.needsFigure
-        ? 'Questa sezione richiede una figura: dichiarala con [IMMAGINE: …] e la didascalia, senza descriverla nel testo corrente.'
+        ? 'Questa sezione richiede una figura didattica. Se spiega un processo, una decisione o una ' +
+          'sequenza, progetta esplicitamente un diagramma di flusso con passaggi, collegamenti e ' +
+          'diramazioni; altrimenti indica il tipo visuale più adatto. Dichiarala con [IMMAGINE: tipo; ' +
+          'contenuto; elementi e relazioni da mostrare] e aggiungi la didascalia, senza sostituire la ' +
+          'figura con una descrizione ridondante nel testo corrente.'
         : '',
       '',
       // Le fonti servono a sapere che cosa è vero, non a essere citate: gli

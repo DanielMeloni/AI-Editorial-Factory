@@ -109,6 +109,48 @@ export async function getCover(projectId: string): Promise<CoverRow | null> {
   return data;
 }
 
+export interface CoverDefaults {
+  title: string;
+  subtitle: string | null;
+  author: string;
+  seriesName: string | null;
+  volumeLabel: string | null;
+}
+
+/** Il volume della collana è la fonte più specifica per i testi di copertina. */
+export async function getCoverDefaults(projectId: string, volumeId?: string): Promise<CoverDefaults> {
+  const supabase = await createClient();
+  const { data: project, error: projectError } = await supabase
+    .from('projects')
+    .select('title, subtitle, author')
+    .eq('id', projectId)
+    .maybeSingle<{ title: string; subtitle: string | null; author: string }>();
+  if (projectError || !project) throw new Error(`Lettura dei dati di copertina fallita: ${projectError?.message ?? ''}`);
+
+  let volumeQuery = supabase
+    .from('project_volumes')
+    .select('id, title, subtitle, volume_number')
+    .eq('project_id', projectId);
+  if (volumeId) volumeQuery = volumeQuery.eq('id', volumeId);
+  const { data: volume } = await volumeQuery
+    .order('volume_number')
+    .limit(1)
+    .maybeSingle<{
+      id: string;
+      title: string;
+      subtitle: string | null;
+      volume_number: number;
+    }>();
+
+  return {
+    title: volume?.title || project.title,
+    subtitle: volume?.subtitle ?? project.subtitle,
+    author: project.author,
+    seriesName: null,
+    volumeLabel: volume ? `VOLUME ${volume.volume_number}` : null,
+  };
+}
+
 export interface StyleGuideRow {
   id: string;
   name: string;
@@ -141,6 +183,10 @@ export interface CoverArtworkRow {
   signedUrl: string | null;
 }
 
+function localAssetUrl(projectId: string, assetId: string): string {
+  return `/api/projects/${encodeURIComponent(projectId)}/visual-assets/${encodeURIComponent(assetId)}`;
+}
+
 export async function listCoverArtwork(projectId: string): Promise<CoverArtworkRow[]> {
   const supabase = await createClient();
 
@@ -155,19 +201,10 @@ export async function listCoverArtwork(projectId: string): Promise<CoverArtworkR
 
   if (error) throw new Error(`Lettura delle grafiche di copertina fallita: ${error.message}`);
 
-  // Le firme scadono: si generano alla richiesta, non si conservano.
-  return Promise.all(
-    (data ?? []).map(async (asset) => {
-      if (!asset.storage_path) return { asset, signedUrl: null };
-      // Un'ora invece di cinque minuti: l'anteprima resta aperta mentre si
-      // confrontano le proposte, e un'immagine che sparisce a metà scelta
-      // sembrerebbe un guasto.
-      const { data: firmato } = await supabase.storage
-        .from(asset.storage_bucket ?? 'generated-assets')
-        .createSignedUrl(asset.storage_path, 3600);
-      return { asset, signedUrl: firmato?.signedUrl ?? null };
-    }),
-  );
+  return (data ?? []).map((asset) => ({
+    asset,
+    signedUrl: asset.storage_path ? localAssetUrl(projectId, asset.id) : null,
+  }));
 }
 
 /**
@@ -190,15 +227,10 @@ export async function listCoverReferences(projectId: string): Promise<CoverArtwo
 
   if (error) throw new Error(`Lettura dei riferimenti fallita: ${error.message}`);
 
-  return Promise.all(
-    (data ?? []).map(async (asset) => {
-      if (!asset.storage_path) return { asset, signedUrl: null };
-      const { data: firmato } = await supabase.storage
-        .from(asset.storage_bucket ?? 'generated-assets')
-        .createSignedUrl(asset.storage_path, 3600);
-      return { asset, signedUrl: firmato?.signedUrl ?? null };
-    }),
-  );
+  return (data ?? []).map((asset) => ({
+    asset,
+    signedUrl: asset.storage_path ? localAssetUrl(projectId, asset.id) : null,
+  }));
 }
 
 /**
@@ -224,11 +256,7 @@ export async function getToolLogo(projectId: string): Promise<CoverArtworkRow | 
   if (!logo) return null;
   if (!logo.storage_path) return { asset: logo, signedUrl: null };
 
-  const { data: firmato } = await supabase.storage
-    .from(logo.storage_bucket ?? 'generated-assets')
-    .createSignedUrl(logo.storage_path, 3600);
-
-  return { asset: logo, signedUrl: firmato?.signedUrl ?? null };
+  return { asset: logo, signedUrl: localAssetUrl(projectId, logo.id) };
 }
 
 /**

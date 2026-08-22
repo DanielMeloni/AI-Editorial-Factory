@@ -5,7 +5,7 @@ import {
   estimateMmPerPageFromGrammage,
 } from '@/lib/cover/spine';
 import { buildIsbnBarcode, ean13CheckDigit, isbn10To13, toIsbn13 } from '@/lib/cover/barcode';
-import { COVER_BACKGROUND } from '@/lib/cover/brand';
+import { BRAND_ART_DIRECTION, COVER_BACKGROUND } from '@/lib/cover/brand';
 import { buildCoverPreviewSvg, computeCoverLayout } from '@/lib/cover/layout';
 
 describe('calcolo del dorso', () => {
@@ -281,6 +281,23 @@ describe('anteprima della copertina', () => {
     expect(svg).toContain('DATI &amp; INGEGNERIA');
   });
 
+  it('compone il badge del volume nella gabbia tipografica', () => {
+    const conVolume = buildCoverPreviewSvg(layout, {
+      title: 'Dataform in Pratica',
+      subtitle: 'Fondamenti e prime pipeline',
+      author: 'Daniel Meloni',
+      volumeLabel: 'Volume 1',
+    });
+    expect(conVolume).toContain('VOLUME 1');
+    expect(conVolume).toContain('rx="5"');
+  });
+
+  it('usa il nuovo sistema visuale tecnico come direzione predefinita', () => {
+    expect(BRAND_ART_DIRECTION).toContain('griglia prospettica');
+    expect(BRAND_ART_DIRECTION).toContain('emblema esagonale centrale');
+    expect(BRAND_ART_DIRECTION).toContain('quattro moduli');
+  });
+
   it('neutralizza i caratteri XML nei testi forniti', () => {
     const pericoloso = buildCoverPreviewSvg(layout, {
       title: '<script>alert(1)</script>',
@@ -313,7 +330,7 @@ describe('anteprima della copertina', () => {
     });
     expect(conLogo).toContain('<image href="https://esempio.test/logo.png"');
     // `meet`, non `slice`: un marchio non si taglia per far quadrare il riquadro.
-    expect(conLogo).toContain('preserveAspectRatio="xMaxYMax meet"');
+    expect(conLogo).toContain('preserveAspectRatio="xMidYMax meet"');
     expect(buildCoverPreviewSvg(layout, { title: 'T', author: 'A' })).not.toContain('logo.png');
   });
 
