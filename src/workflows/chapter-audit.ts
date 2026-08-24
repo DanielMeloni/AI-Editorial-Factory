@@ -118,6 +118,7 @@ export async function chapterAuditWorkflow(input: ChapterAuditInput) {
       stesura.chapter.title,
       technical.dataformRefs,
       loaded.isIncremental,
+      visualPlan,
     );
 
     await markStep(context.workflowRunId, 'richiesta-approvazione', 11, TOTAL_STEPS);

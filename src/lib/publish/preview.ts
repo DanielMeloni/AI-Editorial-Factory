@@ -48,6 +48,18 @@ export async function rebuildVolumePreviewWith(
     return { ok: false, message: 'Progetto non trovato.' };
   }
 
+  const [{ data: volumeConfigurato }, marchio, copertine] = await Promise.all([
+    supabase
+      .from('project_volumes')
+      .select('title, subtitle, volume_number')
+      .eq('project_id', input.projectId)
+      .order('volume_number', { ascending: true })
+      .limit(1)
+      .maybeSingle<{ title: string; subtitle: string | null; volume_number: number }>(),
+    raccogliLogoStrumento(supabase, input.projectId, project.title),
+    raccogliCopertine(supabase, input.projectId),
+  ]);
+
   const volume = await composeVolume(supabase, input.projectId);
   const figurePerCapitolo = await raccogliFigure(
     supabase,
@@ -61,12 +73,20 @@ export async function rebuildVolumePreviewWith(
     versionNo: capitolo.versionNo,
     approved: capitolo.approvato,
     figures: figurePerCapitolo.get(capitolo.id) ?? [],
+    partId: capitolo.partId,
+    partNumber: capitolo.partNumber,
+    partTitle: capitolo.partTitle,
   }));
   const metaPdf = {
     projectTitle: project.title,
-    subtitle: project.subtitle,
+    volumeTitle: volumeConfigurato?.title ?? project.title,
+    subtitle: volumeConfigurato?.subtitle ?? project.subtitle,
     author: project.author,
     volume: project.volume,
+    toolLogoDataUrl: marchio.dataUrl,
+    frontCoverDataUrl: copertine.front,
+    backCoverDataUrl: copertine.back,
+    accentColor: marchio.accentColor,
     generatedAt: new Date().toLocaleString('it-IT'),
     pending: volume.pending.length,
     drafts: volume.chapters.filter((capitolo) => !capitolo.approvato).length,
@@ -167,6 +187,74 @@ export async function rebuildVolumePreviewWith(
   };
 }
 
+async function raccogliCopertine(
+  supabase: SupabaseClient,
+  projectId: string,
+): Promise<{ front: string | null; back: string | null }> {
+  const { data: cover } = await supabase
+    .from('cover_projects')
+    .select('front_asset_id, back_asset_id, updated_at')
+    .eq('project_id', projectId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ front_asset_id: string | null; back_asset_id: string | null; updated_at: string }>();
+  const ids = [cover?.front_asset_id, cover?.back_asset_id].filter((id): id is string => Boolean(id));
+  if (ids.length === 0) return { front: null, back: null };
+  const { data: assets } = await supabase
+    .from('visual_assets')
+    .select('id, storage_bucket, storage_path')
+    .in('id', ids)
+    .returns<{ id: string; storage_bucket: string | null; storage_path: string | null }[]>();
+
+  const incorpora = async (assetId: string | null | undefined): Promise<string | null> => {
+    const asset = (assets ?? []).find((voce) => voce.id === assetId);
+    if (!asset?.storage_path) return null;
+    const { data: file } = await supabase.storage
+      .from(asset.storage_bucket ?? 'generated-assets')
+      .download(asset.storage_path);
+    return file ? rasterDataUrlSicuro(Buffer.from(await file.arrayBuffer())) : null;
+  };
+  const [front, back] = await Promise.all([incorpora(cover?.front_asset_id), incorpora(cover?.back_asset_id)]);
+  return { front, back };
+}
+
+async function raccogliLogoStrumento(
+  supabase: SupabaseClient,
+  projectId: string,
+  projectTitle: string,
+): Promise<{ dataUrl: string | null; accentColor: string }> {
+  const { data: risorse } = await supabase
+    .from('visual_assets')
+    .select('kind, title, storage_bucket, storage_path, created_at')
+    .eq('project_id', projectId)
+    .eq('generator', 'upload')
+    .order('created_at', { ascending: false })
+    .returns<{
+      kind: string;
+      title: string | null;
+      storage_bucket: string | null;
+      storage_path: string | null;
+      created_at: string;
+    }[]>();
+
+  const logo = (risorse ?? []).find(
+    (asset) => asset.kind === 'logo' || asset.storage_path?.includes('/tool-logo/'),
+  );
+  const identita = `${projectTitle} ${logo?.title ?? ''} ${logo?.storage_path ?? ''}`.toLowerCase();
+  const accentColor = identita.includes('databricks')
+    ? '#ff5f46'
+    : identita.includes('dataform') || identita.includes('google') || identita.includes('bigquery')
+      ? '#4285f4'
+      : '#2f7df6';
+
+  if (!logo?.storage_path) return { dataUrl: null, accentColor };
+  const { data: file } = await supabase.storage
+    .from(logo.storage_bucket ?? 'generated-assets')
+    .download(logo.storage_path);
+  if (!file) return { dataUrl: null, accentColor };
+  return { dataUrl: rasterDataUrlSicuro(Buffer.from(await file.arrayBuffer())), accentColor };
+}
+
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes as unknown as ArrayBuffer);
   return Array.from(new Uint8Array(digest))
@@ -197,8 +285,10 @@ async function raccogliFigure(
       'chapter_id, title, caption, alt_text, mermaid_source, storage_bucket, storage_path, version, status',
     )
     .in('chapter_id', chapterIds)
-    .eq('status', 'approved')
-    .order('version', { ascending: true })
+    // L'anteprima è uno spazio di lavoro: mostra anche l'ultima figura in
+    // revisione del capitolo. Restano fuori soltanto gli asset rifiutati.
+    .neq('status', 'rejected')
+    .order('version', { ascending: false })
     .returns<
       {
         chapter_id: string | null;

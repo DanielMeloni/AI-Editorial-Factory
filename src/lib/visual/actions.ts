@@ -311,13 +311,23 @@ const coverSchema = z.object({
   spineFormula: z.enum(['mm_per_page', 'pages_per_inch', 'fixed']),
   spineFactor: z.number().positive().nullable(),
   title: z.string().trim().max(200),
+  titleLine1: z.string().trim().max(120).nullable(),
+  titleLine2: z.string().trim().max(120).nullable(),
   subtitle: z.string().trim().max(300).nullable(),
+  frontDescription: z.string().trim().max(800).nullable(),
+  accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  accentColorSecondary: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  toolName: z.string().trim().max(100).nullable(),
   author: z.string().trim().max(200),
   seriesName: z.string().trim().max(200).nullable(),
   backDescription: z.string().trim().max(3000).nullable(),
   biography: z.string().trim().max(2000).nullable(),
   isbn: z.string().trim().max(20).nullable(),
   price: z.number().min(0).max(100000).nullable(),
+  frontAssetId: z.string().uuid().nullable(),
+  spineAssetId: z.string().uuid().nullable(),
+  backAssetId: z.string().uuid().nullable(),
+  composition: z.record(z.string(), z.unknown()),
 });
 
 export type CoverInput = z.infer<typeof coverSchema>;
@@ -377,13 +387,23 @@ export async function saveCover(input: CoverInput): Promise<VisualActionResult> 
     spine_factor: parsed.data.spineFactor,
     spine_width_mm: spineWidthMm,
     title: parsed.data.title,
+    title_line_1: parsed.data.titleLine1,
+    title_line_2: parsed.data.titleLine2,
     subtitle: parsed.data.subtitle,
+    front_description: parsed.data.frontDescription,
+    accent_color: parsed.data.accentColor,
+    accent_color_secondary: parsed.data.accentColorSecondary,
+    tool_name: parsed.data.toolName,
     author: parsed.data.author,
     series_name: parsed.data.seriesName,
     back_description: parsed.data.backDescription,
     biography: parsed.data.biography,
     isbn: parsed.data.isbn ? parsed.data.isbn.replace(/[\s-]/g, '') : null,
     price: parsed.data.price,
+    front_asset_id: parsed.data.frontAssetId,
+    spine_asset_id: parsed.data.spineAssetId,
+    back_asset_id: parsed.data.backAssetId,
+    composition: parsed.data.composition,
     created_by: user.id,
   };
 
@@ -410,6 +430,66 @@ export async function saveCover(input: CoverInput): Promise<VisualActionResult> 
   };
 }
 
+const COVER_PANEL_KINDS = ['cover_front', 'cover_spine', 'cover_back'] as const;
+type CoverPanelKind = (typeof COVER_PANEL_KINDS)[number];
+
+/** Upload diretto di un pannello già impaginato dall'autore. */
+export async function requestManualCoverPanelTicket(input: {
+  projectId: string; kind: CoverPanelKind; filename: string; byteSize: number; mimeType: string;
+}): Promise<CoverReferenceTicket | { ok: false; message: string }> {
+  await requireUser();
+  const organization = await requireOrganization();
+  if (!z.string().uuid().safeParse(input.projectId).success || !COVER_PANEL_KINDS.includes(input.kind)) {
+    return { ok: false, message: 'Pannello non valido.' };
+  }
+  if (!MIME_RIFERIMENTO.includes(input.mimeType as (typeof MIME_RIFERIMENTO)[number])) {
+    return { ok: false, message: 'Formati ammessi: PNG, JPEG, WebP.' };
+  }
+  if (input.byteSize <= 0 || input.byteSize > MAX_BYTE_RIFERIMENTO) {
+    return { ok: false, message: 'L’immagine supera i 10 MB.' };
+  }
+  const supabase = await createClient();
+  const { data: project } = await supabase.from('projects').select('id, organization_id')
+    .eq('id', input.projectId).maybeSingle<{ id: string; organization_id: string }>();
+  if (!project || project.organization_id !== organization.id) return { ok: false, message: 'Progetto non trovato.' };
+  const assetId = crypto.randomUUID();
+  const extension = input.mimeType === 'image/jpeg' ? 'jpg' : input.mimeType === 'image/webp' ? 'webp' : 'png';
+  const path = `${organization.id}/${input.projectId}/manual-cover/${input.kind}/${assetId}.${extension}`;
+  const { data, error } = await supabase.storage.from('generated-assets').createSignedUploadUrl(path);
+  if (error || !data) return { ok: false, message: 'Impossibile preparare il caricamento.' };
+  return { ok: true, assetId, bucket: 'generated-assets', path, token: data.token };
+}
+
+export async function confirmManualCoverPanel(input: {
+  projectId: string; kind: CoverPanelKind; assetId: string; path: string; filename: string;
+}): Promise<VisualActionResult> {
+  const user = await requireUser();
+  const organization = await requireOrganization();
+  const supabase = await createClient();
+  const prefix = `${organization.id}/${input.projectId}/manual-cover/${input.kind}/`;
+  if (!COVER_PANEL_KINDS.includes(input.kind) || !input.path.startsWith(prefix)) {
+    return { ok: false, message: 'Percorso del pannello non valido.' };
+  }
+  const { data: latest } = await supabase.from('visual_assets').select('version')
+    .eq('project_id', input.projectId).eq('kind', input.kind).order('version', { ascending: false }).limit(1)
+    .maybeSingle<{ version: number }>();
+  const { error } = await supabase.from('visual_assets').insert({
+    id: input.assetId, project_id: input.projectId, organization_id: organization.id,
+    chapter_id: null, kind: input.kind, generator: 'upload', status: 'approved',
+    approved_by: user.id, approved_at: new Date().toISOString(), version: (latest?.version ?? 0) + 1,
+    title: input.filename.slice(0, 200) || 'Copertina caricata',
+    caption: `Pannello ${input.kind} caricato e impaginato dall’autore.`,
+    alt_text: `Pannello di copertina ${input.kind}.`, storage_bucket: 'generated-assets',
+    storage_path: input.path, cost_usd: 0, created_by: user.id,
+  });
+  if (error) {
+    await supabase.storage.from('generated-assets').remove([input.path]);
+    return { ok: false, message: `Registrazione non riuscita: ${error.message}` };
+  }
+  revalidatePath(`/projects/${input.projectId}/cover-studio`);
+  return { ok: true, assetId: input.assetId, message: 'Pannello caricato.' };
+}
+
 // ---------------------------------------------------------------------------
 // Grafica di copertina
 // ---------------------------------------------------------------------------
@@ -426,7 +506,9 @@ const PARTI = [
       'gerarchia verticale molto leggibile. Lascia il 45% superiore quasi nero, pulito e con ' +
       'contrasto uniforme per autore, titolo monumentale con padding, ' +
       'badge del volume e sottotitolo. Nel 55% inferiore crea una griglia prospettica con un ' +
-      'grande emblema esagonale astratto al centro, appoggiato su un plinto luminoso, e quattro ' +
+      'grande supporto esagonale al centro, appoggiato su un plinto luminoso. Se il primo riferimento ' +
+      'fornito è un logo, incorporalo fedelmente dentro il supporto come parte organica della scena, ' +
+      'senza aggiungere una tessera, un riquadro o un secondo fondale sopra la grafica. Aggiungi quattro ' +
       'moduli satelliti simmetrici collegati da linee sottili. Ogni modulo evoca un concetto ' +
       'del manuale con un pittogramma semplice, senza parole. Lascia quieta e simmetrica la fascia ' +
       'inferiore per un logo centrato.',
@@ -571,8 +653,9 @@ export async function generateCoverArtwork(
 
   // Il logo dello strumento apre la fila dei riferimenti: è il dato più
   // specifico che il progetto abbia sul proprio soggetto, e dice al modello
-  // gamma cromatica e geometria di partenza. Il marchio vero, però, non lo
-  // disegna il modello: viene composto sopra la copertina.
+  // gamma cromatica e geometria di partenza. Sul fronte viene chiesto di
+  // incorporarlo nel supporto centrale, evitando la tessera sovrapposta che
+  // rendeva il marchio visivamente separato dalla scena.
   const { data: logo } = await supabase
     .from('visual_assets')
     .select('storage_bucket, storage_path')

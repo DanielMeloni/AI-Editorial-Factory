@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Ruler, Save, Sparkles } from 'lucide-react';
+import { ImageUp, Ruler, Save, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,7 +10,8 @@ import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { generateCoverArtwork, saveCover } from '@/lib/visual/actions';
+import { confirmManualCoverPanel, generateCoverArtwork, requestManualCoverPanelTicket, saveCover } from '@/lib/visual/actions';
+import { createClient } from '@/lib/supabase/client';
 import { AssetCard } from '@/components/visual/asset-card';
 import { CoverReferences } from '@/components/visual/cover-references';
 import { ToolLogo } from '@/components/visual/tool-logo';
@@ -22,7 +23,7 @@ import {
   canLockSpine,
   type SpineFormula,
 } from '@/lib/cover/spine';
-import { buildCoverPreviewSvg, computeCoverLayout } from '@/lib/cover/layout';
+import { buildCoverPreviewSvg, computeCoverLayout, type CoverComposition } from '@/lib/cover/layout';
 import { toIsbn13 } from '@/lib/cover/barcode';
 import type { CoverArtworkRow, CoverRow } from '@/lib/visual/queries';
 
@@ -100,12 +101,42 @@ export function CoverStudio({
   // La configurazione del manuale/volume è la fonte di verità dei testi.
   const titolo = defaults.title;
   const sottotitolo = defaults.subtitle ?? '';
+  const titoliAutomatici = useMemo(() => dividiTitolo(titolo), [titolo]);
+  const [titoloRiga1, setTitoloRiga1] = useState(cover?.title_line_1 ?? titoliAutomatici[0]);
+  const [titoloRiga2, setTitoloRiga2] = useState(cover?.title_line_2 ?? titoliAutomatici[1]);
+  const [descrizioneFronte, setDescrizioneFronte] = useState(cover?.front_description ?? '');
+  const [colorePrimario, setColorePrimario] = useState(cover?.accent_color ?? '#2f7df6');
+  const [coloreSecondario, setColoreSecondario] = useState(cover?.accent_color_secondary ?? '#22d3ee');
+  const [nomeStrumento, setNomeStrumento] = useState(cover?.tool_name ?? titolo.split(/\s+in\s+/i)[0] ?? '');
   const [autore, setAutore] = useState(cover?.author || defaults.author);
   const [collana, setCollana] = useState(cover?.series_name ?? defaults.seriesName ?? '');
   const [quarta, setQuarta] = useState(cover?.back_description ?? '');
   const [bio, setBio] = useState(cover?.biography ?? '');
   const [isbn, setIsbn] = useState(cover?.isbn ?? '');
   const [prezzo, setPrezzo] = useState<string>(cover?.price?.toString() ?? '');
+  const savedComposition = (cover?.composition ?? {}) as CoverComposition;
+  const [frontOverlay, setFrontOverlay] = useState(savedComposition.frontOverlay ?? true);
+  const [backOverlay, setBackOverlay] = useState(savedComposition.backOverlay ?? false);
+  const [spineOverlay, setSpineOverlay] = useState(savedComposition.spineOverlay ?? true);
+  const [bottomBrand, setBottomBrand] = useState(savedComposition.showBottomBrand ?? true);
+  const [fontSizes, setFontSizes] = useState({
+    series: savedComposition.sizes?.series ?? 3.2,
+    author: savedComposition.sizes?.author ?? 5.2,
+    title: savedComposition.sizes?.title ?? 18,
+    volume: savedComposition.sizes?.volume ?? 4.3,
+    subtitle: savedComposition.sizes?.subtitle ?? 4.4,
+    description: savedComposition.sizes?.description ?? 3.5,
+    toolName: savedComposition.sizes?.toolName ?? 5.5,
+  });
+  const [textColors, setTextColors] = useState({
+    series: savedComposition.colors?.series ?? '#93c5fd',
+    title1: savedComposition.colors?.title1 ?? '#f8fafc',
+    volume: savedComposition.colors?.volume ?? '#ffffff',
+    subtitle: savedComposition.colors?.subtitle ?? '#cbd5e1',
+    description: savedComposition.colors?.description ?? '#cbd5e1',
+    author: savedComposition.colors?.author ?? '#f8fafc',
+    toolName: savedComposition.colors?.toolName ?? '#f8fafc',
+  });
 
   // --- Dorso --------------------------------------------------------------
   const numeroPagine = pagine.trim() === '' ? null : Number(pagine);
@@ -147,7 +178,11 @@ export function CoverStudio({
         layout,
         {
           title: titolo,
+          titleLine1: titoloRiga1,
+          titleLine2: titoloRiga2,
           subtitle: sottotitolo || null,
+          frontDescription: descrizioneFronte || null,
+          toolName: nomeStrumento || null,
           author: autore,
           seriesName: collana || null,
           volumeLabel: defaults.volumeLabel,
@@ -158,10 +193,38 @@ export function CoverStudio({
           showGuides: true,
           artwork: grafiche,
           logoHref: logo?.signedUrl ?? null,
+          accent: { primary: colorePrimario, secondary: coloreSecondario },
+          composition: {
+            frontOverlay, backOverlay, spineOverlay, showBottomBrand: bottomBrand,
+            sizes: fontSizes, colors: textColors,
+          },
         },
       ),
     };
-  }, [trimW, trimH, spineMm, bleed, safety, titolo, sottotitolo, autore, collana, quarta, bio, grafiche, logo, defaults.volumeLabel]);
+  }, [trimW, trimH, spineMm, bleed, safety, titolo, titoloRiga1, titoloRiga2, sottotitolo, descrizioneFronte, nomeStrumento, colorePrimario, coloreSecondario, autore, collana, quarta, bio, grafiche, logo, defaults.volumeLabel, frontOverlay, backOverlay, spineOverlay, bottomBrand, fontSizes, textColors]);
+
+  function caricaPannello(kind: 'cover_front' | 'cover_spine' | 'cover_back', file?: File) {
+    if (!file) return;
+    startTransition(async () => {
+      const ticket = await requestManualCoverPanelTicket({
+        projectId, kind, filename: file.name, byteSize: file.size, mimeType: file.type,
+      });
+      if (!ticket.ok) { toast.error(ticket.message); return; }
+      const { error } = await createClient().storage.from(ticket.bucket)
+        .uploadToSignedUrl(ticket.path, ticket.token, file);
+      if (error) { toast.error(`Caricamento non riuscito: ${error.message}`); return; }
+      const result = await confirmManualCoverPanel({
+        projectId, kind, assetId: ticket.assetId, path: ticket.path, filename: file.name,
+      });
+      if (!result.ok) { toast.error(result.message); return; }
+      setSelezione((current) => ({ ...current, [kind]: ticket.assetId }));
+      if (kind === 'cover_front') setFrontOverlay(false);
+      if (kind === 'cover_back') setBackOverlay(false);
+      if (kind === 'cover_spine') setSpineOverlay(false);
+      toast.success(`${result.message} Gli elementi sovrapposti del pannello sono stati nascosti.`);
+      router.refresh();
+    });
+  }
 
   function generaGrafica() {
     startTransition(async () => {
@@ -197,13 +260,26 @@ export function CoverStudio({
         spineFormula: formula,
         spineFactor: numeroFattore,
         title: titolo,
+        titleLine1: titoloRiga1 || null,
+        titleLine2: titoloRiga2 || null,
         subtitle: sottotitolo || null,
+        frontDescription: descrizioneFronte || null,
+        accentColor: colorePrimario,
+        accentColorSecondary: coloreSecondario,
+        toolName: nomeStrumento || null,
         author: autore,
         seriesName: collana || null,
         backDescription: quarta || null,
         biography: bio || null,
         isbn: isbn || null,
         price: prezzo.trim() === '' ? null : Number(prezzo),
+        frontAssetId: selezione.cover_front ?? null,
+        spineAssetId: selezione.cover_spine ?? null,
+        backAssetId: selezione.cover_back ?? null,
+        composition: {
+          frontOverlay, backOverlay, spineOverlay, showBottomBrand: bottomBrand,
+          sizes: fontSizes, colors: textColors,
+        },
       });
 
       if (esito.ok) toast.success(esito.message);
@@ -219,6 +295,65 @@ export function CoverStudio({
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
       <div className="space-y-4">
         {/* ------------------------------------------------------------- */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Copertina manuale</CardTitle>
+            <CardDescription>
+              Carica separatamente pannelli già pronti. L’immagine riempie il pannello senza
+              sovrapposizioni; puoi riattivarle singolarmente nella sezione composizione.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-3">
+            {([
+              ['cover_front', 'Fronte'], ['cover_spine', 'Dorso'], ['cover_back', 'Retro'],
+            ] as const).map(([kind, label]) => (
+              <label key={kind} className="flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed border-border-strong p-4 text-center text-sm hover:bg-surface-muted">
+                <ImageUp className="size-5 text-muted-foreground" aria-hidden="true" />
+                <span className="font-medium">Carica {label.toLowerCase()}</span>
+                <span className="text-xs text-muted-foreground">PNG, JPEG o WebP</span>
+                <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={pending}
+                  onChange={(e) => { caricaPannello(kind, e.target.files?.[0]); e.currentTarget.value = ''; }} />
+              </label>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Composizione e stile</CardTitle>
+            <CardDescription>Nascondi gli elementi sui pannelli già impaginati e regola font e colori del fronte.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-2 sm:grid-cols-2">
+              {[
+                ['Elementi sul fronte', frontOverlay, setFrontOverlay],
+                ['Elementi sul retro', backOverlay, setBackOverlay],
+                ['Testo sul dorso', spineOverlay, setSpineOverlay],
+                ['Logo e nome in fondo', bottomBrand, setBottomBrand],
+              ].map(([label, checked, setter]) => (
+                <label key={label as string} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={checked as boolean} onChange={(e) => (setter as (v: boolean) => void)(e.target.checked)} />
+                  {label as string}
+                </label>
+              ))}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {(Object.keys(fontSizes) as Array<keyof typeof fontSizes>).map((key) => (
+                <Field key={key} id={`font-${key}`} label={`Dimensione ${etichettaStile(key)}`}>
+                  {({ id }) => <Input id={id} type="number" min="1" max="40" step="0.1" value={fontSizes[key]}
+                    onChange={(e) => setFontSizes((v) => ({ ...v, [key]: Number(e.target.value) }))} />}
+                </Field>
+              ))}
+              {(Object.keys(textColors) as Array<keyof typeof textColors>).map((key) => (
+                <Field key={key} id={`color-${key}`} label={`Colore ${etichettaStile(key)}`}>
+                  {({ id }) => <Input id={id} type="color" value={textColors[key]}
+                    onChange={(e) => setTextColors((v) => ({ ...v, [key]: e.target.value }))} />}
+                </Field>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
@@ -345,9 +480,31 @@ export function CoverStudio({
             <Field id="titolo" label="Titolo" required>
               {({ id }) => <Input id={id} value={titolo} readOnly />}
             </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field id="titolo-riga-1" label="Titolo · prima riga" hint="Circa l’80% della larghezza del fronte.">
+                {({ id, describedBy }) => <Input id={id} value={titoloRiga1} onChange={(e) => setTitoloRiga1(e.target.value)} aria-describedby={describedBy} />}
+              </Field>
+              <Field id="titolo-riga-2" label="Titolo · seconda riga" hint="Usa il gradiente della palette.">
+                {({ id, describedBy }) => <Input id={id} value={titoloRiga2} onChange={(e) => setTitoloRiga2(e.target.value)} aria-describedby={describedBy} />}
+              </Field>
+            </div>
             <Field id="sottotitolo" label="Sottotitolo">
               {({ id }) => <Input id={id} value={sottotitolo} readOnly />}
             </Field>
+            <Field id="descrizione-fronte" label="Breve descrizione sul fronte">
+              {({ id }) => <textarea id={id} value={descrizioneFronte} onChange={(e) => setDescrizioneFronte(e.target.value)} rows={3} className="w-full rounded-lg border border-border-strong bg-surface p-2 text-sm" />}
+            </Field>
+            <Field id="nome-strumento" label="Nome dello strumento" hint="Mostrato accanto al logo in fondo al fronte.">
+              {({ id, describedBy }) => <Input id={id} value={nomeStrumento} onChange={(e) => setNomeStrumento(e.target.value)} aria-describedby={describedBy} />}
+            </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field id="colore-primario" label="Colore primario">
+                {({ id }) => <Input id={id} type="color" value={colorePrimario} onChange={(e) => setColorePrimario(e.target.value)} />}
+              </Field>
+              <Field id="colore-secondario" label="Colore gradiente">
+                {({ id }) => <Input id={id} type="color" value={coloreSecondario} onChange={(e) => setColoreSecondario(e.target.value)} />}
+              </Field>
+            </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field id="autore" label="Autore" required>
                 {({ id }) => <Input id={id} value={autore} onChange={(e) => setAutore(e.target.value)} />}
@@ -542,4 +699,23 @@ export function CoverStudio({
       </div>
     </div>
   );
+}
+
+function dividiTitolo(titolo: string): [string, string] {
+  const parole = titolo.trim().split(/\s+/);
+  if (parole.length < 2) return [titolo, ''];
+  let punto = 1;
+  let differenza = Number.POSITIVE_INFINITY;
+  for (let indice = 1; indice < parole.length; indice += 1) {
+    const corrente = Math.abs(parole.slice(0, indice).join(' ').length - parole.slice(indice).join(' ').length);
+    if (corrente < differenza) { differenza = corrente; punto = indice; }
+  }
+  return [parole.slice(0, punto).join(' '), parole.slice(punto).join(' ')];
+}
+
+function etichettaStile(key: string): string {
+  return ({
+    series: 'collana', author: 'autore', title: 'titolo', title1: 'prima riga', volume: 'volume',
+    subtitle: 'sottotitolo', description: 'descrizione', toolName: 'nome strumento',
+  } as Record<string, string>)[key] ?? key;
 }

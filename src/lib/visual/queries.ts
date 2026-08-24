@@ -94,6 +94,13 @@ export interface CoverRow {
   front_asset_id: string | null;
   spine_asset_id: string | null;
   back_asset_id: string | null;
+  title_line_1: string | null;
+  title_line_2: string | null;
+  front_description: string | null;
+  accent_color: string | null;
+  accent_color_secondary: string | null;
+  tool_name: string | null;
+  composition: Record<string, unknown> | null;
 }
 
 export async function getCover(projectId: string): Promise<CoverRow | null> {

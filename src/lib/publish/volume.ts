@@ -30,6 +30,10 @@ export interface CapitoloVolume {
   contentMd: string;
   versionNo: number;
   wordCount: number;
+  partId: string | null;
+  partNumber: number | null;
+  partTitle: string | null;
+  partOrderIndex: number | null;
 }
 
 export interface VolumeComposto {
@@ -48,6 +52,7 @@ interface RigaCapitolo {
   order_index: number;
   status: string;
   current_version_id: string | null;
+  part_id: string | null;
 }
 
 export interface VersioneComponibile {
@@ -75,12 +80,21 @@ export async function composeVolume(
 ): Promise<VolumeComposto> {
   const { data: capitoli, error } = await supabase
     .from('chapters')
-    .select('id, kind, number, label, title, order_index, status, current_version_id')
+    .select('id, kind, number, label, title, order_index, status, current_version_id, part_id')
     .eq('project_id', projectId)
     .order('order_index', { ascending: true })
     .returns<RigaCapitolo[]>();
 
   if (error) throw new Error(`Lettura dei capitoli fallita: ${error.message}`);
+
+  const { data: parti, error: partiError } = await supabase
+    .from('publication_parts')
+    .select('id, number, title, order_index')
+    .eq('project_id', projectId)
+    .order('order_index', { ascending: true })
+    .returns<{ id: string; number: number | null; title: string; order_index: number }[]>();
+  if (partiError) throw new Error(`Lettura delle parti fallita: ${partiError.message}`);
+  const partiPerId = new Map((parti ?? []).map((parte) => [parte.id, parte]));
 
   const soloApprovati = opzioni.soloApprovati ?? false;
 
@@ -137,6 +151,10 @@ export async function composeVolume(
       contentMd: versione.content_md,
       versionNo: versione.version_no,
       wordCount: versione.word_count,
+      partId: capitolo.part_id,
+      partNumber: capitolo.part_id ? (partiPerId.get(capitolo.part_id)?.number ?? null) : null,
+      partTitle: capitolo.part_id ? (partiPerId.get(capitolo.part_id)?.title ?? null) : null,
+      partOrderIndex: capitolo.part_id ? (partiPerId.get(capitolo.part_id)?.order_index ?? null) : null,
     });
   }
 

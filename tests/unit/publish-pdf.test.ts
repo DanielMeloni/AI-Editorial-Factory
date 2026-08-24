@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exportPdf, exportVolumePdfLineare } from '@/lib/publish/pdf';
+import { exportPdf, exportVolumePdf, exportVolumePdfLineare } from '@/lib/publish/pdf';
 import type { ExportMeta } from '@/lib/publish/markdown';
 
 const META: ExportMeta = {
@@ -75,6 +75,46 @@ describe('esportazione PDF', () => {
 
     expect(Array.from(bytes.slice(0, 5))).toEqual([0x25, 0x50, 0x44, 0x46, 0x2d]);
     expect(bytes.byteLength).toBeGreaterThan(1000);
+  }, 30_000);
+
+  it('il renderer di sicurezza pagina contenuti patologicamente lunghi', async () => {
+    const bloccoLungo = Array.from(
+      { length: 450 },
+      (_, i) => `- Voce ${i}: ${'identificatore_molto_lungo_'.repeat(12)} con una spiegazione completa.`,
+    ).join('\n');
+    const bytes = await exportVolumePdfLineare(
+      [{
+        label: 'Capitolo 1',
+        title: 'Contenuto complesso',
+        contentMd: `# Contenuto complesso\n\n## Obiettivi\n\n${bloccoLungo}\n\n\`\`\`sql\n${'select campo_molto_lungo from tabella;\n'.repeat(300)}\`\`\``,
+        versionNo: 1,
+        approved: true,
+        figures: [],
+      }],
+      {
+        projectTitle: 'Dataform in pratica', subtitle: null, author: 'Daniel Meloni',
+        volume: null, generatedAt: '2026-08-22', pending: 0, drafts: 0,
+      },
+    );
+
+    expect(Array.from(bytes.slice(0, 5))).toEqual([0x25, 0x50, 0x44, 0x46, 0x2d]);
+    expect(bytes.byteLength).toBeGreaterThan(10_000);
+  }, 30_000);
+
+  it('disegna un diagramma Mermaid nel volume senza stampare il sorgente', async () => {
+    const bytes = await exportVolumePdf(
+      [{
+        label: 'Capitolo 1', title: 'Flusso', contentMd: 'Introduzione.\n\n## Sezione\n\n[IMMAGINE: flusso]',
+        versionNo: 1, approved: true,
+        figures: [{ title: 'Pipeline', caption: null, altText: 'Flusso', dataUrl: null, unavailableReason: null, mermaidSource: 'flowchart LR\nA[Repository] --> B[Workspace]\nB --> C[Workflow]' }],
+      }],
+      {
+        projectTitle: 'Dataform in pratica', volumeTitle: 'Volume 1', subtitle: null,
+        author: 'Daniel Meloni', volume: 'Volume 1', generatedAt: '2026-08-23', pending: 0, drafts: 0,
+      },
+    );
+    expect(Array.from(bytes.slice(0, 5))).toEqual([0x25, 0x50, 0x44, 0x46, 0x2d]);
+    expect(bytes.byteLength).toBeGreaterThan(4000);
   }, 30_000);
 
   it('rimuove il titolo H1 duplicato e gestisce callout e codice', async () => {

@@ -20,6 +20,7 @@ import { mergeSuggestions, researchClaims } from '@/lib/sources/research';
 import { verifyUrls } from '@/lib/sources/verify-url';
 import { extractConfigBlock } from '@/lib/agents/analysis/dataform';
 import { buildDependencyDag } from '@/lib/visual/mermaid-dag';
+import { buildFlowDiagram } from '@/lib/visual/diagrams';
 import type {
   ChapterApparatusOutput,
   ChapterInput,
@@ -1064,15 +1065,32 @@ export async function generateDiagrams(
   chapterTitle: string,
   dataformRefs: string[],
   isIncremental: boolean,
+  visualPlan: VisualPlanOutput,
 ): Promise<{ assetIds: string[]; mermaid: string | null }> {
   'use step';
 
   const db = createAdminClient();
-  const diagram = buildDependencyDag({
-    target: chapterTitle,
-    dependencies: dataformRefs,
-    isIncremental,
-  });
+  const dipendenze = dataformRefs.filter((ref) => !/^https?:/i.test(ref) && ref.length <= 100);
+  const richieste = visualPlan.items.filter((item) => item.kind === 'diagramma').slice(0, 4);
+  const diagrammi = richieste.length > 0
+    ? richieste.map((item) => {
+        if (item.diagramType === 'dag' && dipendenze.length > 0) {
+          return buildDependencyDag({ target: chapterTitle, dependencies: dipendenze, isIncremental });
+        }
+        const candidati = `${item.title}. ${item.caption}`
+          .replace(/[“”"']/g, '')
+          .split(/\s*(?:→|->|—|;|,|\bpoi\b)\s*/i)
+          .map((voce) => voce.replace(/^(?:schema|diagramma|flusso)\s+(?:di|del|della)?\s*/i, '').trim())
+          .filter((voce) => voce.length >= 3 && voce.length <= 70)
+          .slice(0, 6);
+        const passaggi = candidati.length >= 2
+          ? candidati
+          : ['Contesto', 'Configurazione', 'Esecuzione', 'Risultato'];
+        return buildFlowDiagram(item.title, passaggi.map((label) => ({ label })));
+      })
+    : dipendenze.length > 0
+      ? [buildDependencyDag({ target: chapterTitle, dependencies: dipendenze, isIncremental })]
+      : [];
 
   const { data: existing } = await db
     .from('visual_assets')
@@ -1083,9 +1101,9 @@ export async function generateDiagrams(
     .limit(1)
     .maybeSingle<{ version: number }>();
 
-  const { data: asset, error } = await db
-    .from('visual_assets')
-    .insert({
+  const assetIds: string[] = [];
+  for (const [indice, diagram] of diagrammi.entries()) {
+    const { data: asset, error } = await db.from('visual_assets').insert({
       project_id: context.projectId,
       organization_id: context.organizationId,
       chapter_id: context.chapterId,
@@ -1093,7 +1111,7 @@ export async function generateDiagrams(
       generator: 'mermaid',
       // Anche un diagramma esatto richiede l'occhio umano prima di finire nel libro.
       status: 'pending_approval',
-      version: (existing?.version ?? 0) + 1,
+      version: (existing?.version ?? 0) + indice + 1,
       title: diagram.title,
       caption: diagram.caption,
       alt_text: diagram.altText,
@@ -1101,12 +1119,14 @@ export async function generateDiagrams(
       created_by: context.actorId,
     })
     .select('id')
-    .single<{ id: string }>();
+      .single<{ id: string }>();
 
-  if (error || !asset)
-    throw new Error(`Salvataggio del diagramma fallito: ${error?.message ?? ''}`);
+    if (error || !asset)
+      throw new Error(`Salvataggio del diagramma fallito: ${error?.message ?? ''}`);
+    assetIds.push(asset.id);
+  }
 
-  return { assetIds: [asset.id], mermaid: diagram.mermaid };
+  return { assetIds, mermaid: diagrammi[0]?.mermaid ?? null };
 }
 
 // ---------------------------------------------------------------------------
