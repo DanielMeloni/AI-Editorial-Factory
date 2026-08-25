@@ -36,7 +36,13 @@ export function ChapterAuditStatus({ chapterId, initialRun, initialWords }: { ch
     const supabase = createClient();
     const channel = supabase.channel(`audit-capitolo-${chapterId}`).on('postgres_changes', {
       event: '*', schema: 'public', table: 'workflow_runs', filter: `chapter_id=eq.${chapterId}`,
-    }, (event) => setRun(event.new as WorkflowRunRow)).on('postgres_changes', {
+    }, (event) => {
+      // Quando un nuovo audit sostituisce i precedenti arrivano anche eventi
+      // DELETE. `event.new` in quel caso è vuoto e non deve cancellare lo stato
+      // del nuovo run appena inserito.
+      if (event.eventType === 'DELETE') void refresh();
+      else setRun(event.new as WorkflowRunRow);
+    }).on('postgres_changes', {
       event: 'UPDATE', schema: 'public', table: 'chapters', filter: `id=eq.${chapterId}`,
     }, (event) => {
       const updated = event.new as { word_count?: number };

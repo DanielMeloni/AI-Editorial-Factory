@@ -788,8 +788,8 @@ export const chapterPlanAgent: AgentDefinition<ChapterDraftInput, ChapterPlanOut
       'Estratti disponibili:',
       input.evidence || '(nessun estratto disponibile)',
       '',
-      'Progetta da 4 a 8 sezioni di corpo. Non includere riassunto, punti chiave, quiz, ' +
-        'laboratorio o riferimenti: sono apparato e vengono composti a parte.',
+      'Progetta da 4 a 8 sezioni di corpo. Non includere riassunto, punti chiave o ' +
+        'riferimenti: sono apparato e vengono composti a parte. Non prevedere quiz, esercizi o laboratori.',
       'Distribuisci nel capitolo da 2 a 4 sezioni con `needsFigure: true`, quando il materiale lo ' +
         'consente. Scegli i punti in cui una figura riduce davvero il carico cognitivo: flussi per ' +
         'processi o decisioni, sequenze per interazioni temporali, architetture per componenti e ' +
@@ -798,6 +798,36 @@ export const chapterPlanAgent: AgentDefinition<ChapterDraftInput, ChapterPlanOut
     ]
       .filter(Boolean)
       .join('\n'),
+  deterministic: (input) => {
+    const titoliEsistenti = Array.from(input.existingContent.matchAll(/^##\s+(.+)$/gm))
+      .map((match) => match[1]!.replace(/^\d+(?:\.\d+)*\s+/, '').trim())
+      .filter((titolo) => !/obiettivi|riassunto|punti chiave|quiz|laboratorio|buone pratiche|errori comuni/i.test(titolo));
+    const fallback = [
+      `Il problema affrontato da ${input.title}`,
+      'Concetti e componenti fondamentali',
+      'Flusso operativo e applicazione',
+      'Verifica del risultato e limiti',
+    ];
+    const titoli = (titoliEsistenti.length >= 3 ? titoliEsistenti : fallback).slice(0, 8);
+    const obiettivoBase = input.objective.replace(/\s+/g, ' ').trim();
+    return {
+      objectives: [
+        obiettivoBase || `Comprendere lo scopo di ${input.title}`,
+        `Distinguere i componenti principali di ${input.title}`,
+        `Applicare e verificare il flusso descritto nel capitolo`,
+      ],
+      sections: titoli.map((title, index) => {
+        const blocco = estraiSezioneMarkdown(input.existingContent, title);
+        return {
+          title,
+          intent: `Spiegare ${title.toLowerCase()} usando esclusivamente il contenuto e gli estratti disponibili.`,
+          needsCode: /```/.test(blocco),
+          needsFigure: /\[IMMAGINE:/i.test(blocco) || index === 1,
+        };
+      }),
+      confidence: input.existingContent.trim().length > 500 ? 0.9 : input.evidence.trim() ? 0.7 : 0.35,
+    };
+  },
 };
 
 export interface ChapterSectionInput extends ChapterDraftInput {
@@ -882,6 +912,19 @@ export const chapterSectionAgent: AgentDefinition<ChapterSectionInput, ChapterSe
     ]
       .filter(Boolean)
       .join('\n'),
+  deterministic: (input) => {
+    const esistente = estraiSezioneMarkdown(input.existingContent, input.sectionTitle);
+    const estratto = esistente || estrattoPerSezione(input.evidence, input.sectionTitle);
+    const titolo = `## ${input.number ?? ''}.${input.sectionNumber} ${input.sectionTitle}`;
+    if (estratto) {
+      const corpo = estratto.replace(/^##\s+.*\r?\n?/, '').trim();
+      return { contentMd: `${titolo}\n\n${corpo}`, gaps: [] };
+    }
+    return {
+      contentMd: `${titolo}\n\nLe fonti disponibili non contengono ancora materiale sufficiente per sviluppare questa sezione senza introdurre informazioni non verificate.`,
+      gaps: [`Mancano estratti sufficienti per la sezione «${input.sectionTitle}».`],
+    };
+  },
 };
 
 export interface ChapterApparatusInput extends ChapterDraftInput {
@@ -898,8 +941,8 @@ export const chapterApparatusInputSchema = chapterDraftInputSchema.extend({
 });
 
 /**
- * Apparato di chiusura: best practice, errori comuni, riassunto, punti chiave,
- * quiz, laboratorio, riferimenti.
+ * Apparato di chiusura editoriale: best practice, errori comuni, riassunto e
+ * punti chiave. È un manuale professionale, non un testo universitario.
  *
  * Riceve il corpo già scritto perché deve riassumere quello. Un riassunto
  * dedotto dalla scaletta riassumerebbe le intenzioni, non il capitolo.
@@ -914,12 +957,11 @@ export const chapterApparatusAgent: AgentDefinition<ChapterApparatusInput, Chapt
     outputSchema: chapterApparatusOutputSchema,
     maxOutputTokens: 8000,
     system:
-      'Componi l’apparato di chiusura di un capitolo di manuale tecnico: best practice, errori ' +
-      'comuni, riassunto, punti chiave, quiz e laboratorio. Ti basi soltanto sul capitolo che ti ' +
+      'Componi l’apparato di chiusura di un capitolo di manuale tecnico professionale: best practice, ' +
+      'errori comuni, riassunto e punti chiave. Ti basi soltanto sul capitolo che ti ' +
       'viene dato e sugli estratti: non introduci concetti che il capitolo non tratta. ' +
-      'Il quiz ha una sola risposta corretta per domanda e le tre alternative sono plausibili, non ' +
-      'assurde. Il laboratorio è un esercizio eseguibile in un progetto Google Cloud reale, con ' +
-      'obiettivo, passi e risultato atteso. Non produci alcuna bibliografia e non inserisci URL: ' +
+      'Non produrre quiz, domande di verifica, esercizi o laboratori: il lettore deve conoscere e ' +
+      'usare lo strumento, non sostenere una valutazione. Non produrre alcuna bibliografia e non inserire URL: ' +
       'le fonti sono raccolte in un capitolo a parte. Rispondi in italiano.\n\n' +
       CONVENZIONI,
 
@@ -937,7 +979,42 @@ export const chapterApparatusAgent: AgentDefinition<ChapterApparatusInput, Chapt
       ]
         .filter(Boolean)
         .join('\n'),
+    deterministic: (input) => {
+      const punti = input.objectives.slice(0, 5);
+      while (punti.length < 3) punti.push(`Rivedere il contenuto della sezione ${punti.length + 1}.`);
+      const sintesi = input.body
+        .replace(/^#{1,6}\s+/gm, '')
+        .replace(/\[IMMAGINE:[^\]]+\]/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 1400);
+      return {
+        bestPractices: punti.slice(0, 3).map((punto) => `Verifica operativamente questo obiettivo: ${punto}`),
+        commonErrors: ['Procedere senza verificare i prerequisiti descritti nel capitolo.', 'Confondere il risultato atteso con il singolo passaggio operativo.'],
+        summary: sintesi || `Il capitolo organizza i concetti essenziali relativi a ${input.title}.`,
+        keyPoints: punti,
+        gaps: [],
+      };
+    },
   };
+
+function estraiSezioneMarkdown(markdown: string, title: string): string {
+  const normalizza = (value: string) => value.toLowerCase().replace(/^\d+(?:\.\d+)*\s+/, '').replace(/[^a-z0-9à-ÿ]+/gi, ' ').trim();
+  const cercato = normalizza(title);
+  const matches = Array.from(markdown.matchAll(/^##\s+(.+)$/gm));
+  const trovato = matches.find((match) => normalizza(match[1] ?? '') === cercato);
+  if (!trovato || trovato.index === undefined) return '';
+  const prossimo = matches.find((match) => (match.index ?? 0) > trovato.index!);
+  return markdown.slice(trovato.index, prossimo?.index ?? markdown.length).trim();
+}
+
+function estrattoPerSezione(evidence: string, title: string): string {
+  if (!evidence.trim()) return '';
+  const termini = title.toLowerCase().split(/\W+/).filter((termine) => termine.length > 4);
+  const blocchi = evidence.split(/\n\n+/).filter(Boolean);
+  const pertinenti = blocchi.filter((blocco) => termini.some((termine) => blocco.toLowerCase().includes(termine)));
+  return (pertinenti.length > 0 ? pertinenti : blocchi).slice(0, 4).join('\n\n').slice(0, 5000).trim();
+}
 
 // ===========================================================================
 // Blog — piano degli angoli e stesura

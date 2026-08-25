@@ -38,8 +38,36 @@ export interface CommentRow {
   created_at: string;
 }
 
+export type ReviewRequestWithChapter = ReviewRequestRow & {
+  chapters: { title: string; number: number | null; label: string | null } | null;
+};
+
+/**
+ * Prima ciò che richiede ancora una decisione, poi lo storico già deciso.
+ * Dentro i due gruppi prevale l'ordine editoriale del capitolo, non la data
+ * dell'audit: la pagina Revisioni segue così la lettura del volume.
+ */
+export function orderReviewRequests(reviews: ReviewRequestWithChapter[]): ReviewRequestWithChapter[] {
+  const collator = new Intl.Collator('it', { numeric: true, sensitivity: 'base' });
+  return [...reviews].sort((a, b) => {
+    const stato = Number(a.status !== 'pending') - Number(b.status !== 'pending');
+    if (stato !== 0) return stato;
+
+    const numeroA = a.chapters?.number;
+    const numeroB = b.chapters?.number;
+    if (numeroA !== null && numeroA !== undefined && numeroB !== null && numeroB !== undefined) {
+      if (numeroA !== numeroB) return numeroA - numeroB;
+    } else if (numeroA !== null && numeroA !== undefined) return -1;
+    else if (numeroB !== null && numeroB !== undefined) return 1;
+
+    const label = collator.compare(a.chapters?.label ?? '', b.chapters?.label ?? '');
+    if (label !== 0) return label;
+    return Date.parse(b.requested_at) - Date.parse(a.requested_at);
+  });
+}
+
 export async function listReviewRequests(projectId: string): Promise<
-  (ReviewRequestRow & { chapters: { title: string; number: number | null; label: string | null } | null })[]
+  ReviewRequestWithChapter[]
 > {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -54,7 +82,7 @@ export async function listReviewRequests(projectId: string): Promise<
     >();
 
   if (error) throw new Error(`Lettura delle revisioni fallita: ${error.message}`);
-  return data ?? [];
+  return orderReviewRequests(data ?? []);
 }
 
 export async function getReviewRequest(reviewId: string): Promise<ReviewRequestRow | null> {

@@ -418,7 +418,17 @@ export async function saveCover(input: CoverInput): Promise<VisualActionResult> 
     ? await supabase.from('cover_projects').update(record).eq('id', esistente.id)
     : await supabase.from('cover_projects').insert(record);
 
-  if (error) return { ok: false, message: `Salvataggio non riuscito: ${error.message}` };
+  if (error) {
+    const schemaCopertinaNonAggiornato =
+      /Could not find the ['\"](?:accent_color|accent_color_secondary|title_line_1|title_line_2|front_description|tool_name|composition)['\"] column/i.test(error.message) ||
+      /schema cache/i.test(error.message) && /cover_projects/i.test(error.message);
+    return {
+      ok: false,
+      message: schemaCopertinaNonAggiornato
+        ? 'Database non aggiornato per il nuovo Cover Studio. Applica le migrazioni 20260823090001_cover_front_style.sql e 20260824090001_cover_composition.sql in Supabase, quindi riprova.'
+        : `Salvataggio non riuscito: ${error.message}`,
+    };
+  }
 
   revalidatePath(`/projects/${parsed.data.projectId}/cover-studio`);
 

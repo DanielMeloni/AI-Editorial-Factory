@@ -60,12 +60,9 @@ export default async function ReviewsPage({
           {reviews.map((review) => {
             const stato = STATO[review.status];
             const capitolo = review.chapters;
-            const etichetta = capitolo
-              ? capitolo.label
-                ? `Appendice ${capitolo.label}`
-                : capitolo.number !== null
-                  ? `Capitolo ${capitolo.number}`
-                  : ''
+            const riferimentoCapitolo = capitolo?.label ?? capitolo?.number;
+            const etichetta = riferimentoCapitolo !== null && riferimentoCapitolo !== undefined
+              ? `Capitolo ${String(riferimentoCapitolo).replace(/^appendice\s+/i, '').replace(/^capitolo\s+/i, '')}`
               : '';
 
             return (

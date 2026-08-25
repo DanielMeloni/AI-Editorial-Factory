@@ -46,12 +46,9 @@ export default async function ReviewDetailPage({
   ]);
 
   const readOnly = review.status !== 'pending';
-  const etichetta = chapter
-    ? chapter.label
-      ? `Appendice ${chapter.label}`
-      : chapter.number !== null
-        ? `Capitolo ${chapter.number}`
-        : ''
+  const riferimentoCapitolo = chapter?.label ?? chapter?.number;
+  const etichetta = riferimentoCapitolo !== null && riferimentoCapitolo !== undefined
+    ? `Capitolo ${String(riferimentoCapitolo).replace(/^appendice\s+/i, '').replace(/^capitolo\s+/i, '')}`
     : '';
 
   return (

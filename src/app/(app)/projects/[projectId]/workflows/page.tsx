@@ -12,6 +12,20 @@ import { getProject } from '@/lib/projects/queries';
 import { listAgentRuns, listWorkflowRuns } from '@/lib/workflows/queries';
 import { isTerminalStatus } from '@/lib/workflow/status';
 
+function chapterLabel(chapter: NonNullable<Awaited<ReturnType<typeof listWorkflowRuns>>[number]['chapter']>) {
+  const prefix = chapter.label?.trim()
+    ? chapter.label.trim()
+    : chapter.kind === 'appendix'
+      ? chapter.number !== null
+        ? `Appendice ${chapter.number}`
+        : 'Appendice'
+      : chapter.number !== null
+        ? `Capitolo ${chapter.number}`
+        : 'Capitolo';
+
+  return `${prefix} – ${chapter.title}`;
+}
+
 export default async function WorkflowsPage({
   params,
 }: {
@@ -60,6 +74,25 @@ export default async function WorkflowsPage({
                         {run.attempt} · {run.completed_steps}/{run.total_steps} passaggi
                         {costo > 0 ? ` · $${costo.toFixed(4)}` : ' · nessun costo'}
                       </CardDescription>
+                      {run.chapter ? (
+                        <p className="text-sm font-medium text-foreground">
+                          Capitolo interessato:{' '}
+                          {run.chapter_id ? (
+                            <Link
+                              href={`/projects/${projectId}/chapters/${run.chapter_id}`}
+                              className="text-primary hover:underline"
+                            >
+                              {chapterLabel(run.chapter)}
+                            </Link>
+                          ) : (
+                            chapterLabel(run.chapter)
+                          )}
+                        </p>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          Capitolo interessato: non disponibile
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap gap-2">

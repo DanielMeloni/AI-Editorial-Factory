@@ -8,6 +8,10 @@ alter table public.cover_projects
   add column if not exists tool_name text;
 
 alter table public.cover_projects
+  drop constraint if exists cover_projects_accent_color_hex,
+  drop constraint if exists cover_projects_accent_color_secondary_hex;
+
+alter table public.cover_projects
   add constraint cover_projects_accent_color_hex
     check (accent_color is null or accent_color ~ '^#[0-9A-Fa-f]{6}$'),
   add constraint cover_projects_accent_color_secondary_hex

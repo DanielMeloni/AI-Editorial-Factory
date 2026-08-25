@@ -233,28 +233,6 @@ function componiCapitolo(
   parti.push('## Riassunto', '', apparato.summary, '');
   parti.push('## Punti chiave', '', ...apparato.keyPoints.map((voce) => `- ${voce}`), '');
 
-  if (apparato.quiz.length > 0) {
-    parti.push('## Quiz', '', 'Per ogni domanda una sola risposta è corretta.', '');
-    apparato.quiz.forEach((domanda, indice) => {
-      parti.push(`${indice + 1}. **${domanda.question}**`, '');
-      domanda.options.forEach((opzione, i) => {
-        parti.push(`   ${String.fromCharCode(97 + i)}) ${opzione}`);
-      });
-      parti.push('');
-    });
-    // Le soluzioni stanno in fondo e non accanto alla domanda: un quiz con la
-    // risposta a vista non verifica nulla.
-    parti.push(
-      '**Soluzioni:** ' +
-        apparato.quiz
-          .map((domanda, indice) => `${indice + 1}-${String.fromCharCode(97 + domanda.correct)}`)
-          .join(', '),
-      '',
-    );
-  }
-
-  if (apparato.lab.trim()) parti.push('## Laboratorio', '', apparato.lab.trim(), '');
-
   // Nessuna sezione di riferimenti: le fonti dell'opera stanno tutte nel
   // capitolo di bibliografia, dove si aggiornano in un posto solo invece che
   // in trenta code di capitolo.

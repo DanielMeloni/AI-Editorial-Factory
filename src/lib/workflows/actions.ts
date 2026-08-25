@@ -99,6 +99,42 @@ export async function startChapterAudit(chapterId: string, globalSequence = fals
     return { ok: false, message: 'Registrazione del workflow non riuscita.' };
   }
 
+  // Il nuovo run esiste: soltanto ora si può rimuovere lo storico precedente
+  // senza rischiare di lasciare il capitolo privo di audit se l'inserimento
+  // fallisce. Le versioni del manoscritto non vengono eliminate: sono storia
+  // editoriale, non log di esecuzione.
+  const admin = createAdminClient();
+  const { data: precedenti, error: letturaPrecedentiError } = await admin
+    .from('workflow_runs')
+    .select('id')
+    .eq('chapter_id', chapterId)
+    .eq('kind', CHAPTER_AUDIT)
+    .neq('id', run.id)
+    .returns<{ id: string }[]>();
+
+  if (letturaPrecedentiError) {
+    await admin.from('workflow_runs').delete().eq('id', run.id);
+    return { ok: false, message: 'Impossibile preparare la sostituzione degli audit precedenti.' };
+  }
+
+  const idsPrecedenti = (precedenti ?? []).map((voce) => voce.id);
+  if (idsPrecedenti.length > 0) {
+    // review_requests usa ON DELETE SET NULL: va rimossa esplicitamente,
+    // altrimenti la vecchia revisione resterebbe visibile ma senza audit.
+    const { error: reviewError } = await admin
+      .from('review_requests')
+      .delete()
+      .in('workflow_run_id', idsPrecedenti);
+    const { error: runsError } = reviewError
+      ? { error: reviewError }
+      : await admin.from('workflow_runs').delete().in('id', idsPrecedenti);
+
+    if (runsError) {
+      await admin.from('workflow_runs').delete().eq('id', run.id);
+      return { ok: false, message: 'Pulizia degli audit precedenti non riuscita. Nessun nuovo audit è stato avviato.' };
+    }
+  }
+
   try {
     const started = await start(chapterAuditWorkflow, [
       {
@@ -114,12 +150,12 @@ export async function startChapterAudit(chapterId: string, globalSequence = fals
 
     // L'identificativo del motore permette di ritrovare l'esecuzione
     // nell'osservabilità di Vercel.
-    await createAdminClient()
+    await admin
       .from('workflow_runs')
       .update({ external_run_id: started.runId ?? null })
       .eq('id', run.id);
   } catch (caught) {
-    await createAdminClient()
+    await admin
       .from('workflow_runs')
       .update({
         status: 'failed',
@@ -137,7 +173,7 @@ export async function startChapterAudit(chapterId: string, globalSequence = fals
     action: 'workflow.started',
     entityType: 'workflow_run',
     entityId: run.id,
-    metadata: { kind: CHAPTER_AUDIT, chapterId },
+    metadata: { kind: CHAPTER_AUDIT, chapterId, removedPreviousRuns: idsPrecedenti.length },
   });
 
   revalidatePath(`/projects/${chapter.project_id}/workflows`);

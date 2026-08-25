@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  chapterApparatusAgent,
+  chapterPlanAgent,
+  chapterSectionAgent,
   sourceAuditorAgent,
   technicalVerifierAgent,
   technicalWriterAgent,
@@ -65,6 +68,50 @@ function toInput(markdown: string): ChapterInput {
 }
 
 const input = toInput(CAPITOLO_11);
+
+const draftInput = {
+  chapterId: input.chapterId,
+  number: input.number,
+  title: input.title,
+  objective: 'Comprendere e applicare le tabelle incrementali.',
+  partTitle: 'Pipeline dati',
+  language: 'it',
+  direzione: 'Manuale tecnico professionale.',
+  references: [],
+  evidence: CAPITOLO_11,
+  existingContent: CAPITOLO_11,
+  manualOutline: ['11. Incremental Tables'],
+  previousChapters: [],
+};
+
+describe('Stesura deterministica con provider mock', () => {
+  it('copre piano, sezione e apparato senza quiz o laboratorio', () => {
+    const piano = chapterPlanAgent.deterministic!(draftInput);
+    expect(chapterPlanAgent.outputSchema.safeParse(piano).success).toBe(true);
+
+    const sezione = chapterSectionAgent.deterministic!({
+      ...draftInput,
+      sectionTitle: piano.sections[0]!.title,
+      sectionIntent: piano.sections[0]!.intent,
+      needsCode: piano.sections[0]!.needsCode,
+      needsFigure: piano.sections[0]!.needsFigure,
+      sectionNumber: 1,
+      outline: piano.sections.map((item) => item.title),
+      objectives: piano.objectives,
+    });
+    expect(chapterSectionAgent.outputSchema.safeParse(sezione).success).toBe(true);
+
+    const apparato = chapterApparatusAgent.deterministic!({
+      ...draftInput,
+      objectives: piano.objectives,
+      outline: piano.sections.map((item) => item.title),
+      body: sezione.contentMd,
+    });
+    expect(chapterApparatusAgent.outputSchema.safeParse(apparato).success).toBe(true);
+    expect(apparato).not.toHaveProperty('quiz');
+    expect(apparato).not.toHaveProperty('lab');
+  });
+});
 
 /** Le affermazioni che il Technical Verifier consegna al Source Auditor. */
 const claims = technicalVerifierAgent.deterministic!(input).claims;

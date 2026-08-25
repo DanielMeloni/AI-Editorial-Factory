@@ -247,7 +247,7 @@ export function CoverStudio({
     });
   }, [artwork.length, cover, projectId, router, volumeId]);
 
-  function salva() {
+  function salva(apriAnteprimaVolume = false) {
     startTransition(async () => {
       const esito = await saveCover({
         projectId,
@@ -282,9 +282,18 @@ export function CoverStudio({
         },
       });
 
-      if (esito.ok) toast.success(esito.message);
-      else toast.error(esito.message);
-      router.refresh();
+      if (esito.ok) {
+        toast.success(
+          apriAnteprimaVolume
+            ? 'Copertina salvata. Apro l’anteprima aggiornata del volume.'
+            : esito.message,
+        );
+        if (apriAnteprimaVolume) {
+          router.push(`/projects/${projectId}/preview`);
+          return;
+        }
+        router.refresh();
+      } else toast.error(esito.message);
     });
   }
 
@@ -596,7 +605,7 @@ export function CoverStudio({
         </Card>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button disabled={pending} onClick={salva}>
+          <Button disabled={pending} onClick={() => salva(false)}>
             <Save aria-hidden="true" />
             {pending ? 'Salvataggio…' : 'Salva copertina'}
           </Button>
@@ -674,6 +683,11 @@ export function CoverStudio({
               // valori già validati: nessun contenuto esterno viene interpretato.
               dangerouslySetInnerHTML={{ __html: anteprima.svg }}
             />
+
+            <Button className="w-full" disabled={pending} onClick={() => salva(true)}>
+              <Save aria-hidden="true" />
+              {pending ? 'Salvataggio…' : 'Salva copertina e visualizza nel volume'}
+            </Button>
 
             <dl className="grid grid-cols-2 gap-2 text-xs">
               {[

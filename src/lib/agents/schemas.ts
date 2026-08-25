@@ -422,19 +422,6 @@ export const chapterApparatusOutputSchema = z.object({
   commonErrors: z.array(z.string().max(800)).max(8),
   summary: z.string().max(4000),
   keyPoints: z.array(z.string().max(400)).min(3).max(10),
-  quiz: z
-    .array(
-      z.object({
-        question: z.string().max(400),
-        options: z.array(z.string().max(300)).length(4),
-        /** Indice della risposta corretta, da 0 a 3. */
-        correct: z.number().int().min(0).max(3),
-      }),
-    )
-    .min(3)
-    .max(8),
-  /** Il laboratorio con cui si chiude ogni capitolo del volume. */
-  lab: z.string().max(4000),
   gaps: z.array(z.string()).max(10),
 });
 

@@ -12,6 +12,12 @@ export interface WorkflowRunRow {
   total_steps: number;
   attempt: number;
   chapter_id: string | null;
+  chapter: {
+    number: number | null;
+    label: string | null;
+    title: string;
+    kind: string;
+  } | null;
   external_run_id: string | null;
   input: Record<string, unknown>;
   output: Record<string, unknown> | null;
@@ -54,7 +60,9 @@ export async function listWorkflowRuns(projectId: string): Promise<WorkflowRunRo
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('workflow_runs')
-    .select('*')
+    .select(
+      'id, kind, status, current_step, completed_steps, total_steps, attempt, chapter_id, external_run_id, input, output, error, created_at, started_at, finished_at, chapter:chapters(number, label, title, kind)',
+    )
     .eq('project_id', projectId)
     .order('created_at', { ascending: false })
     .limit(50)

@@ -21,7 +21,7 @@ const STEPS: { key: string; label: string; nota: string }[] = [
   {
     key: 'stesura-capitolo',
     label: '2 · Stesura del capitolo',
-    nota: 'Scrive il capitolo dalle fonti: prima la scaletta, poi una sezione per volta, infine riassunto, quiz e laboratorio.',
+    nota: 'Scrive il capitolo dalle fonti: prima la scaletta, poi una sezione per volta, infine riassunto, punti chiave e indicazioni operative.',
   },
   {
     key: 'verifica-tecnica',

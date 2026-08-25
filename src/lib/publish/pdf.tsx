@@ -111,13 +111,18 @@ const styles = StyleSheet.create({
   riferimento: { fontSize: 8.5, color: colori.tenue, marginBottom: 3 },
   piede: {
     position: 'absolute',
-    bottom: 32,
+    bottom: 20,
     left: 64,
     right: 64,
+    height: 28,
+    borderTopWidth: 0.7,
+    borderTopColor: colori.bordo,
+    paddingTop: 7,
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     fontSize: 8,
-    color: colori.tenue,
+    color: colori.testo,
     fontFamily: 'Helvetica',
   },
   testatina: {
@@ -696,6 +701,7 @@ export async function exportVolumePdf(
             L’anteprima raccoglie tutto ciò che è stato scritto, approvato o no. Avvia l’audit su un
             capitolo e comparirà qui.
           </Text>
+          <PiePagina meta={meta} />
         </Page>
       ) : null}
 
@@ -911,7 +917,7 @@ function PiePagina({ meta }: { meta: VolumeMeta }) {
       <View style={{ width: '40%', height: 18, alignItems: 'flex-end', justifyContent: 'center' }}>
         {meta.toolLogoDataUrl ? (
           // eslint-disable-next-line jsx-a11y/alt-text
-          <Image src={meta.toolLogoDataUrl} style={{ maxWidth: 74, maxHeight: 18, objectFit: 'contain' }} />
+          <Image src={meta.toolLogoDataUrl} style={{ width: 74, height: 16, objectFit: 'contain', objectPosition: 'right center' }} />
         ) : null}
       </View>
     </View>
