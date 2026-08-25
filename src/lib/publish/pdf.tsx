@@ -125,6 +125,16 @@ const styles = StyleSheet.create({
     color: colori.testo,
     fontFamily: 'Helvetica',
   },
+  numeroPagina: {
+    position: 'absolute',
+    bottom: 27,
+    right: 64,
+    width: 48,
+    textAlign: 'right',
+    fontSize: 8.5,
+    color: colori.testo,
+    fontFamily: 'Helvetica-Bold',
+  },
   testatina: {
     position: 'absolute', top: 26, left: 64, right: 64,
     flexDirection: 'row', justifyContent: 'space-between',
@@ -549,6 +559,7 @@ export async function exportVolumePdf(
   meta: VolumeMeta,
 ): Promise<Uint8Array> {
   const gruppiParte = raggruppaParti(chapters);
+  const pagineIndice = calcolaPagineIndice(chapters);
   const documento = (
     <Document
       title={`${meta.projectTitle}${meta.volume ? ` — ${meta.volume}` : ''}`}
@@ -589,6 +600,7 @@ export async function exportVolumePdf(
       {/* Indice */}
       {chapters.length > 0 ? (
         <Page size="A4" style={styles.page}>
+          <Testatina meta={meta} label="SOMMARIO" accent={meta.accentColor ?? colori.accento} />
           <Text style={styles.titolo}>Indice</Text>
           {gruppiParte.map((parte) => (
             <View key={`toc-parte-${parte.key}`} style={{ marginBottom: 14 }}>
@@ -601,11 +613,12 @@ export async function exportVolumePdf(
                 <View key={`toc-${parte.key}-${indice}`} style={{ ...styles.vocElenco, marginLeft: parte.title ? 12 : 0 }}>
                   <Text style={{ ...styles.segno, width: 74, fontFamily: 'Helvetica', fontSize: 9 }}>{capitolo.label}</Text>
                   <Text style={styles.vocTesto}>{capitolo.title}{capitolo.approved ? '' : '  (bozza)'}</Text>
+                  <Text style={{ width: 28, textAlign: 'right', fontFamily: 'Helvetica-Bold' }}>{pagineIndice.get(capitolo) ?? ''}</Text>
                 </View>
               ))}
             </View>
           ))}
-          <PiePagina meta={meta} />
+          <PiePagina meta={meta} numerazione="romana" />
         </Page>
       ) : null}
 
@@ -624,6 +637,7 @@ export async function exportVolumePdf(
           <React.Fragment key={`cap-${indice}`}>
             {(indice === 0 || chapters[indice - 1]?.partId !== capitolo.partId) && capitolo.partTitle ? (
               <Page size="A4" style={styles.page}>
+                <Testatina meta={meta} label={`PARTE ${capitolo.partNumber ?? ''} · ${capitolo.partTitle}`} accent={accent} />
                 <Text style={{ fontSize: 11, color: accent, fontFamily: 'Helvetica-Bold', letterSpacing: 1, marginTop: 100 }}>
                   PARTE {capitolo.partNumber ?? ''}
                 </Text>
@@ -637,10 +651,11 @@ export async function exportVolumePdf(
                     <Text style={{ flex: 1 }}>{voce.title}</Text>
                   </View>
                 ))}
-                <PiePagina meta={meta} />
+                <PiePagina meta={meta} numerazione="araba" />
               </Page>
             ) : null}
             <Page size="A4" style={styles.page}>
+              <Testatina meta={meta} label={`${numero} · ${capitolo.title.toUpperCase()}`} accent={accent} />
               <Text style={styles.aperturaNumero}>{numero}</Text>
               <View style={styles.aperturaCorpo}>
                 <Text style={{ ...styles.aperturaLabel, color: accent }}>CAPITOLO {numero}</Text>
@@ -663,14 +678,12 @@ export async function exportVolumePdf(
                   ))}
                 </View>
               </View>
-              <PiePagina meta={meta} />
+              <PiePagina meta={meta} numerazione="araba" />
             </Page>
 
             {sezioni.map((sezione, sezioneIndice) => (
               <Page key={`c${indice}-s${sezioneIndice}`} size="A4" style={{ ...styles.page, paddingTop: 72 }}>
-                <View style={{ ...styles.testatina, borderBottomColor: accent }} fixed>
-                  <Text>{numero} · {capitolo.title.toUpperCase()}</Text>
-                </View>
+                <Testatina meta={meta} label={`${numero} · ${capitolo.title.toUpperCase()}`} accent={accent} />
                 {sezione.map((node, nodeIndice) => {
                   if (node.type === 'blockquote') {
                     return <CalloutPagina key={`c${indice}-s${sezioneIndice}-n${nodeIndice}`} node={node} />;
@@ -686,7 +699,7 @@ export async function exportVolumePdf(
                 {sezioneIndice === sezioni.length - 1
                   ? capitolo.figures.slice(indiceFigura).map((figura, i) => renderFigure(figura, `c${indice}-extra${i}`))
                   : null}
-                <PiePagina meta={meta} />
+                <PiePagina meta={meta} numerazione="araba" />
               </Page>
             ))}
           </React.Fragment>
@@ -696,12 +709,13 @@ export async function exportVolumePdf(
       {/* Un volume senza capitoli convalidati lo dice, invece di essere vuoto */}
       {chapters.length === 0 ? (
         <Page size="A4" style={styles.page}>
+          <Testatina meta={meta} label="CONTENUTO" accent={meta.accentColor ?? colori.accento} />
           <Text style={styles.titolo}>Nessun capitolo scritto</Text>
           <Text style={styles.paragrafo}>
             L’anteprima raccoglie tutto ciò che è stato scritto, approvato o no. Avvia l’audit su un
             capitolo e comparirà qui.
           </Text>
-          <PiePagina meta={meta} />
+          <PiePagina meta={meta} numerazione="araba" />
         </Page>
       ) : null}
 
@@ -727,6 +741,7 @@ export async function exportVolumePdfLineare(
   meta: VolumeMeta,
 ): Promise<Uint8Array> {
   const gruppiParte = raggruppaParti(chapters);
+  const pagineIndice = calcolaPagineIndice(chapters);
   const documento = (
     <Document
       title={pulisciTestoPdf(meta.projectTitle)}
@@ -752,14 +767,15 @@ export async function exportVolumePdfLineare(
       </Page>}
 
       <Page size="A4" style={styles.page}>
+        <Testatina meta={meta} label="SOMMARIO" accent={meta.accentColor ?? colori.accento} />
         <Text style={styles.titolo}>Indice</Text>
         {gruppiParte.map((parte) => (
           <View key={`safe-toc-${parte.key}`} style={{ marginBottom: 12 }}>
             {parte.title ? <Text style={{ fontFamily: 'Helvetica-Bold', color: meta.accentColor ?? colori.accento, marginBottom: 5 }}>{parte.number ? `PARTE ${parte.number} — ` : ''}{parte.title}</Text> : null}
-            {parte.chapters.map((capitolo) => <Text key={`safe-toc-${capitolo.label}`} style={{ marginLeft: parte.title ? 12 : 0, marginBottom: 4 }}>{capitolo.label} — {capitolo.title}</Text>)}
+            {parte.chapters.map((capitolo) => <View key={`safe-toc-${capitolo.label}`} style={{ flexDirection: 'row', marginLeft: parte.title ? 12 : 0, marginBottom: 4 }}><Text style={{ flex: 1 }}>{capitolo.label} — {capitolo.title}</Text><Text style={{ width: 28, textAlign: 'right' }}>{pagineIndice.get(capitolo) ?? ''}</Text></View>)}
           </View>
         ))}
-        <PiePagina meta={meta} />
+        <PiePagina meta={meta} numerazione="romana" />
       </Page>
 
       {chapters.map((chapter, indice) => {
@@ -783,15 +799,17 @@ export async function exportVolumePdfLineare(
           <React.Fragment key={`safe-${indice}`}>
             {(indice === 0 || chapters[indice - 1]?.partId !== chapter.partId) && chapter.partTitle ? (
               <Page size="A4" style={styles.page}>
+                <Testatina meta={meta} label={`PARTE ${chapter.partNumber ?? ''} · ${chapter.partTitle}`} accent={accent} />
                 <Text style={{ marginTop: 110, fontFamily: 'Helvetica-Bold', fontSize: 11, color: accent }}>PARTE {chapter.partNumber ?? ''}</Text>
                 <Text style={{ marginTop: 18, marginBottom: 30, fontFamily: 'Helvetica-Bold', fontSize: 32 }}>{chapter.partTitle}</Text>
                 {chapters.filter((voce) => voce.partId === chapter.partId).map((voce) => <Text key={`safe-part-${voce.label}`} style={{ marginBottom: 8 }}>{voce.label} — {voce.title}</Text>)}
-                <PiePagina meta={meta} />
+                <PiePagina meta={meta} numerazione="araba" />
               </Page>
             ) : null}
             {/* Anche il renderer di sicurezza conserva l'apertura editoriale:
                 il lettore non deve poter ricadere nel vecchio PDF lineare. */}
             <Page size="A4" style={styles.page}>
+              <Testatina meta={meta} label={`${numero} · ${pulisciTestoPdf(chapter.title.toUpperCase()).slice(0, 110)}`} accent={accent} />
               <Text style={styles.aperturaNumero}>{numero}</Text>
               <View style={styles.aperturaCorpo}>
                 <Text style={{ ...styles.aperturaLabel, color: accent }}>CAPITOLO {numero}</Text>
@@ -814,14 +832,12 @@ export async function exportVolumePdfLineare(
                   ))}
                 </View>
               </View>
-              <PiePagina meta={meta} />
+              <PiePagina meta={meta} numerazione="araba" />
             </Page>
 
             {sezioniSicure.flatMap((sezione, sezioneIndice) => sezione.pagine.map((testoPagina, paginaIndice) => (
               <Page key={`safe-page-${indice}-${sezioneIndice}-${paginaIndice}`} size="A4" style={{ ...styles.page, paddingTop: 72 }}>
-                <View style={{ ...styles.testatina, borderBottomColor: accent }} fixed>
-                  <Text>{numero} · {pulisciTestoPdf(chapter.title.toUpperCase()).slice(0, 110)}</Text>
-                </View>
+                <Testatina meta={meta} label={`${numero} · ${pulisciTestoPdf(chapter.title.toUpperCase()).slice(0, 110)}`} accent={accent} />
                 {/* Un unico nodo Text, già paginato e limitato: niente liste o
                     box annidati da cui Yoga possa ricavare coordinate infinite. */}
                 {paginaIndice === 0 ? sezione.callout.map((node, calloutIndice) => (
@@ -830,7 +846,7 @@ export async function exportVolumePdfLineare(
                 <Text style={{ fontSize: 9.5, lineHeight: 1.55, textAlign: 'justify' }}>
                   {testoPagina}
                 </Text>
-                <PiePagina meta={meta} />
+                <PiePagina meta={meta} numerazione="araba" />
               </Page>
             )))}
           </React.Fragment>
@@ -872,6 +888,22 @@ function raggruppaParti(chapters: VolumeChapterInput[]): GruppoParte[] {
   return Array.from(gruppi.values());
 }
 
+/** Pagina araba di apertura di ogni capitolo, contando le pagine editoriali. */
+function calcolaPagineIndice(chapters: VolumeChapterInput[]): Map<VolumeChapterInput, number> {
+  const pagine = new Map<VolumeChapterInput, number>();
+  let pagina = 1;
+  for (const [indice, chapter] of chapters.entries()) {
+    const nuovaParte = (indice === 0 || chapters[indice - 1]?.partId !== chapter.partId) && chapter.partTitle;
+    if (nuovaParte) pagina += 1;
+    pagine.set(chapter, pagina);
+    const tree = parsePdfMarkdown(chapter.contentMd, chapter.title);
+    const esclusi = nodiSezioneObiettivi(tree);
+    const sezioni = suddividiSottocapitoli(tree.children.filter((node) => !esclusi.has(node)));
+    pagina += 1 + sezioni.length;
+  }
+  return pagine;
+}
+
 function DiagrammaMermaid({ source }: { source: string }) {
   const etichette = new Map<string, string>();
   const patternNodo = /\b([A-Za-z][\w-]*)\s*(?:\[([^\]]+)\]|\(([^)]+)\)|\{([^}]+)\})/g;
@@ -907,21 +939,49 @@ function DiagrammaMermaid({ source }: { source: string }) {
   );
 }
 
-function PiePagina({ meta }: { meta: VolumeMeta }) {
+function Testatina({ meta, label, accent }: { meta: VolumeMeta; label: string; accent: string }) {
   return (
-    <View style={styles.piede} fixed>
-      <Text style={{ width: '40%', textAlign: 'left' }}>
-        {pulisciTestoPdf(meta.volumeTitle || meta.projectTitle).slice(0, 90)}
-      </Text>
-      <Text style={{ width: '20%', textAlign: 'center' }} render={({ pageNumber }) => `${pageNumber}`} />
-      <View style={{ width: '40%', height: 18, alignItems: 'flex-end', justifyContent: 'center' }}>
-        {meta.toolLogoDataUrl ? (
-          // eslint-disable-next-line jsx-a11y/alt-text
-          <Image src={meta.toolLogoDataUrl} style={{ width: 74, height: 16, objectFit: 'contain', objectPosition: 'right center' }} />
-        ) : null}
-      </View>
+    <View style={{ ...styles.testatina, borderBottomColor: accent }} fixed>
+      <Text style={{ flex: 1, paddingRight: 12 }}>{pulisciTestoPdf(label).slice(0, 115)}</Text>
+      {meta.toolLogoDataUrl ? (
+        // eslint-disable-next-line jsx-a11y/alt-text
+        <Image src={meta.toolLogoDataUrl} style={{ width: 62, height: 14, objectFit: 'contain', objectPosition: 'right center' }} />
+      ) : null}
     </View>
   );
+}
+
+function PiePagina({ meta, numerazione }: { meta: VolumeMeta; numerazione: 'romana' | 'araba' }) {
+  return (
+    <>
+      <View style={styles.piede} fixed>
+        <Text style={{ width: '78%', textAlign: 'left' }}>
+          {pulisciTestoPdf(meta.volumeTitle || meta.projectTitle).slice(0, 90)}
+        </Text>
+      </View>
+      <Text
+        style={styles.numeroPagina}
+        fixed
+        render={({ pageNumber }) => {
+          const numero = Math.max(1, pageNumber - (numerazione === 'romana' ? 1 : 2));
+          return numerazione === 'romana' ? numeroRomano(numero).toLowerCase() : String(numero);
+        }}
+      />
+    </>
+  );
+}
+
+function numeroRomano(value: number): string {
+  const simboli: Array<[number, string]> = [
+    [1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'],
+    [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I'],
+  ];
+  let resto = Math.max(1, Math.floor(value));
+  let risultato = '';
+  for (const [numero, simbolo] of simboli) {
+    while (resto >= numero) { risultato += simbolo; resto -= numero; }
+  }
+  return risultato;
 }
 
 function numeroCapitolo(label: string, indice: number): string {
