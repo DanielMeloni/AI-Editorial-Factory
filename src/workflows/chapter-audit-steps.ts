@@ -16,6 +16,7 @@ import { istruzioniEditoriali } from '@/lib/editorial/direzione';
 import { budgetParole, istruzioniBrief } from '@/lib/editorial/brief';
 import { rebuildVolumePreviewWith } from '@/lib/publish/preview';
 import { buildProjectIndex } from '@/lib/sources/library';
+import { MAX_MATCHED_TERMS } from '@/lib/sources/match';
 import { mergeSuggestions, researchClaims } from '@/lib/sources/research';
 import { verifyUrls } from '@/lib/sources/verify-url';
 import { extractConfigBlock } from '@/lib/agents/analysis/dataform';
@@ -927,9 +928,20 @@ export async function proposeRevision(
 
   const db = createAdminClient();
 
+  // Difesa al confine del workflow: esecuzioni avviate con una versione
+  // precedente del matcher, oppure suggerimenti provenienti da altri adapter,
+  // possono contenere più termini del contratto accettato dall'agente.
+  const normalizedSuggestions = suggestions.map((suggestion) => ({
+    ...suggestion,
+    candidates: suggestion.candidates.map((candidate) => ({
+      ...candidate,
+      matchedTerms: candidate.matchedTerms.slice(0, MAX_MATCHED_TERMS),
+    })),
+  }));
+
   const result = await runAgent(
     technicalWriterAgent,
-    { ...chapter, issues, suggestions },
+    { ...chapter, issues, suggestions: normalizedSuggestions },
     {
       db,
       organizationId: context.organizationId,
@@ -949,7 +961,7 @@ export async function proposeRevision(
     const deterministica = technicalWriterAgent.deterministic?.({
       ...chapter,
       issues,
-      suggestions,
+      suggestions: normalizedSuggestions,
     });
     if (deterministica) revision = deterministica;
   }

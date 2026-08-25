@@ -7,7 +7,14 @@ import {
   isOfficialDomain,
   lookupUrl,
 } from '@/lib/sources/catalog';
-import { DEFAULT_MIN_SCORE, findSources, tokenize } from '@/lib/sources/match';
+import {
+  buildSourceIndex,
+  DEFAULT_MIN_SCORE,
+  findSources,
+  MAX_MATCHED_TERMS,
+  searchIndex,
+  tokenize,
+} from '@/lib/sources/match';
 import { assessCitation } from '@/lib/agents/analysis/sources';
 import { sourceAuditorAgent } from '@/lib/agents/definitions';
 import { analyzeMarkdown } from '@/lib/ingest/markdown';
@@ -144,6 +151,26 @@ describe('ricerca delle fonti', () => {
       category: 'costo',
     });
     expect(risultati[0]!.matchedTerms.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('limita i termini associati al contratto accettato dagli agenti', () => {
+    const terms = Array.from({ length: 30 }, (_, index) => `termine${index}`);
+    const index = buildSourceIndex([
+      {
+        url: 'https://docs.cloud.google.com/dataform/docs/example',
+        title: 'Pagina di esempio',
+        section: 'Esempio',
+        product: 'dataform',
+        origin: 'catalogo_ufficiale',
+        referenceId: null,
+        page: null,
+        topics: terms,
+      },
+    ]);
+
+    const [candidate] = searchIndex(index, terms.join(' '), { minScore: 0 });
+
+    expect(candidate?.matchedTerms).toHaveLength(MAX_MATCHED_TERMS);
   });
 
   it('riconduce le forme italiane e inglesi allo stesso termine', () => {

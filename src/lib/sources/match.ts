@@ -86,6 +86,9 @@ export const DEFAULT_MIN_SCORE = 1.2;
 /** Numero predefinito di candidati proposti per affermazione. */
 export const DEFAULT_LIMIT = 3;
 
+/** Limite condiviso con lo schema Zod degli input degli agenti. */
+export const MAX_MATCHED_TERMS = 20;
+
 // ---------------------------------------------------------------------------
 // Normalizzazione lessicale
 // ---------------------------------------------------------------------------
@@ -392,7 +395,18 @@ export function searchIndex(
       referenceId: entry.referenceId,
       page: entry.page,
       score: Math.round(score * 1000) / 1000,
-      matchedTerms: matched.sort(),
+      // Un capitolo lungo può condividere decine di termini con una fonte.
+      // Conserviamo quelli che hanno contribuito di più al punteggio: oltre
+      // questo limite il dettaglio non aiuta il revisore e non è accettato
+      // dal contratto Zod passato agli agenti.
+      matchedTerms: matched
+        .sort((a, b) => {
+          const contributionA = (index.idf.get(a) ?? 0) * (terms.get(a) ?? 0);
+          const contributionB = (index.idf.get(b) ?? 0) * (terms.get(b) ?? 0);
+          return contributionB - contributionA || a.localeCompare(b);
+        })
+        .slice(0, MAX_MATCHED_TERMS)
+        .sort(),
     });
   }
 
