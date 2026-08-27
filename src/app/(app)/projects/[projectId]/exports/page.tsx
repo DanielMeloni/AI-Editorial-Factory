@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PublishPanel } from '@/components/publish/publish-panel';
 import { DownloadButton } from '@/components/publish/download-button';
+import { DeleteExportButton } from '@/components/publish/delete-export-button';
 import { getProject } from '@/lib/projects/queries';
 import { listExportableChapters, listExports, listOutputs } from '@/lib/publish/queries';
 
@@ -79,6 +80,7 @@ export default async function ExportsPage({ params }: { params: Promise<{ projec
                   {exports.map((esportazione) => {
                     const stato = STATO[esportazione.status];
                     const capitolo = esportazione.chapters;
+                    const etichetta = `${FORMATO_LABEL[esportazione.format]} — ${capitolo?.title ?? 'capitolo rimosso'}`;
                     return (
                       <li
                         key={esportazione.id}
@@ -94,8 +96,16 @@ export default async function ExportsPage({ params }: { params: Promise<{ projec
                           {formatBytes(esportazione.byte_size)}
                         </span>
                         <Badge tone={stato.tone}>{stato.label}</Badge>
+                        {esportazione.format === 'pdf' ? (
+                          <Badge tone={esportazione.preflight_status === 'passed' ? 'success' : esportazione.preflight_status === 'failed' ? 'danger' : 'neutral'}>
+                            preflight {esportazione.preflight_status === 'passed' ? 'superato' : esportazione.preflight_status === 'failed' ? 'fallito' : 'in attesa'}
+                          </Badge>
+                        ) : null}
                         {esportazione.status === 'ready' ? (
                           <DownloadButton exportId={esportazione.id} label="Scarica" />
+                        ) : null}
+                        {esportazione.status !== 'running' ? (
+                          <DeleteExportButton exportId={esportazione.id} label={etichetta} />
                         ) : null}
                         {esportazione.error ? (
                           <p className="text-danger w-full text-xs">{esportazione.error}</p>

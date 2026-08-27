@@ -32,6 +32,13 @@ export async function createProject(_prev: ActionState, formData: FormData): Pro
     scope: formData.get('scope') ?? '',
     outOfScope: formData.get('outOfScope') ?? '',
     audience: formData.get('audience') ?? '',
+    audienceGoal: formData.get('audienceGoal') ?? '',
+    allowedPrerequisites: formData.get('allowedPrerequisites') ?? '',
+    jargonBudget: formData.get('jargonBudget') ?? '5',
+    quickWinMaxPages: formData.get('quickWinMaxPages') ?? '25',
+    advancedContentPolicy: formData.get('advancedContentPolicy') ?? 'appendix',
+    requireUiScreenshots: formData.get('requireUiScreenshots') === 'on',
+    requireExpectedStateVisuals: formData.get('requireExpectedStateVisuals') === 'on',
   });
 
   if (!parsed.success) {
@@ -81,6 +88,22 @@ export async function createProject(_prev: ActionState, formData: FormData): Pro
       scope: parsed.data.scope || null,
       out_of_scope: parsed.data.outOfScope || null,
       audience: parsed.data.audience || null,
+      audience_profile: {
+        level: parsed.data.level === 'base' ? 'beginner' : parsed.data.level,
+        goal:
+          parsed.data.audienceGoal ||
+          parsed.data.audience ||
+          'Comprendere i concetti e completare il primo risultato operativo guidato.',
+        allowedPrerequisites: (parsed.data.allowedPrerequisites ?? '')
+          .split(/\r?\n|;/)
+          .map((item) => item.trim())
+          .filter(Boolean),
+        jargonBudget: parsed.data.jargonBudget,
+        quickWinMaxPages: parsed.data.quickWinMaxPages,
+        advancedContentPolicy: parsed.data.advancedContentPolicy,
+        requireUiScreenshots: parsed.data.requireUiScreenshots,
+        requireExpectedStateVisuals: parsed.data.requireExpectedStateVisuals,
+      },
       created_by: user.id,
     })
     .select('id')
@@ -112,6 +135,22 @@ export async function createProject(_prev: ActionState, formData: FormData): Pro
     subtitle: parsed.data.subtitle || null,
     level: parsed.data.level,
     audience: parsed.data.audience || null,
+    audience_profile: {
+      level: parsed.data.level === 'base' ? 'beginner' : parsed.data.level,
+      goal:
+        parsed.data.audienceGoal ||
+        parsed.data.audience ||
+        'Comprendere i concetti e completare il primo risultato operativo guidato.',
+      allowedPrerequisites: (parsed.data.allowedPrerequisites ?? '')
+        .split(/\r?\n|;/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+      jargonBudget: parsed.data.jargonBudget,
+      quickWinMaxPages: parsed.data.quickWinMaxPages,
+      advancedContentPolicy: parsed.data.advancedContentPolicy,
+      requireUiScreenshots: parsed.data.requireUiScreenshots,
+      requireExpectedStateVisuals: parsed.data.requireExpectedStateVisuals,
+    },
     scope: parsed.data.scope || null,
     out_of_scope: parsed.data.outOfScope || null,
     target_pages: typeof parsed.data.targetPages === 'number' ? parsed.data.targetPages : null,

@@ -13,6 +13,25 @@ export type SourceStatus = 'uploaded' | 'extracting' | 'extracted' | 'partial' |
 export type PartKind = 'front_matter' | 'part' | 'appendix' | 'back_matter';
 export type ChapterStatus = 'draft' | 'in_review' | 'approved' | 'published';
 export type VersionOrigin = 'original' | 'ai_proposal' | 'human_edit' | 'approved';
+export type EditorialArtifactKind =
+  | 'manuscript_content'
+  | 'qa_metadata'
+  | 'evidence'
+  | 'internal_notes'
+  | 'visual_spec'
+  | 'approved_asset'
+  | 'publication_metadata';
+
+export interface AudienceProfile {
+  level: 'beginner' | 'intermediate' | 'advanced';
+  goal: string;
+  allowedPrerequisites: string[];
+  jargonBudget: number;
+  quickWinMaxPages: number;
+  advancedContentPolicy: 'inline' | 'callout' | 'appendix' | 'next_volume';
+  requireUiScreenshots: boolean;
+  requireExpectedStateVisuals: boolean;
+}
 
 export interface OrganizationRow {
   id: string;
@@ -47,6 +66,7 @@ export interface ProjectRow {
   scope: string | null;
   out_of_scope: string | null;
   audience: string | null;
+  audience_profile: AudienceProfile;
   created_at: string;
   updated_at: string;
 }
@@ -79,6 +99,7 @@ export interface ProjectVolumeRow {
   subtitle: string | null;
   level: 'base' | 'intermediate' | 'advanced';
   audience: string | null;
+  audience_profile: AudienceProfile | null;
   scope: string | null;
   out_of_scope: string | null;
   target_pages: number | null;
@@ -139,5 +160,6 @@ export interface ChapterVersionRow {
   content_hash: string;
   word_count: number;
   is_approved: boolean;
+  artifact_kind: 'manuscript_content';
   created_at: string;
 }

@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Badge } from '@/components/ui/badge';
 import { AssetCard } from './asset-card';
 import { generateIllustration } from '@/lib/visual/actions';
+import { EditorialCapture } from './editorial-capture';
 import type { AssetRow } from '@/lib/visual/queries';
 
 const FILTRI = [
@@ -21,6 +22,7 @@ const FILTRI = [
   { key: 'approved', label: 'Approvati' },
   { key: 'diagram', label: 'Diagrammi' },
   { key: 'illustration', label: 'Illustrazioni' },
+  { key: 'capture', label: 'Schermate' },
 ] as const;
 
 type Filtro = (typeof FILTRI)[number]['key'];
@@ -52,7 +54,8 @@ export function VisualStudio({
 
   const visibili = assets.filter((asset) => {
     if (filtro === 'tutti') return true;
-    if (filtro === 'diagram' || filtro === 'illustration') return asset.kind === filtro;
+    if (filtro === 'capture') return asset.capture_source === 'ui_capture';
+    if (filtro === 'diagram' || filtro === 'illustration') return asset.kind === filtro && asset.capture_source !== 'ui_capture';
     return asset.status === filtro;
   });
 
@@ -93,6 +96,8 @@ export function VisualStudio({
           provider reali si configurano da <code>AI_IMAGE_PROVIDER</code>.
         </Alert>
       ) : null}
+
+      <EditorialCapture projectId={projectId} />
 
       <Card>
         <CardHeader>

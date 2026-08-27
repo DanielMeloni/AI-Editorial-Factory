@@ -520,13 +520,14 @@ export type VisualPlanInput = z.infer<typeof visualPlanInputSchema>;
 export const visualPlanAgent: AgentDefinition<VisualPlanInput, VisualPlanOutput> = {
   key: 'visual_art_director',
   name: 'Visual Art Director',
-  version: 1,
-  promptVersion: 'v1',
+  version: 2,
+  promptVersion: 'v2',
   inputSchema: visualPlanInputSchema,
   outputSchema: visualPlanOutputSchema,
   system:
-    'Definisci quali figure servono a un capitolo tecnico: diagrammi precisi per architetture e ' +
-    'dipendenze, illustrazioni concettuali per le idee. Rispondi in italiano.',
+    'Definisci quali visual servono a un capitolo tecnico distinguendo concetto, procedura e risultato. ' +
+    'Usa diagrammi deterministici per architetture e dipendenze, screenshot reali annotati per le ' +
+    'procedure UI e immagini di stato atteso per confermare il risultato. Rispondi in italiano.',
 
   buildPrompt: (input) =>
     [
@@ -544,6 +545,8 @@ export const visualPlanAgent: AgentDefinition<VisualPlanInput, VisualPlanOutput>
       items.push({
         kind: 'diagramma',
         diagramType: 'dag',
+        role: 'concetto',
+        requiresRealCapture: false,
         title: `Grafo delle dipendenze — ${input.title}`,
         caption: `Dipendenze dichiarate con ref(): ${input.dataformRefs.join(', ')}.`,
         altText: `Diagramma delle dipendenze fra ${input.dataformRefs.length} tabelle sorgente e il modello descritto nel capitolo.`,
@@ -558,9 +561,23 @@ export const visualPlanAgent: AgentDefinition<VisualPlanInput, VisualPlanOutput>
       const wantsDiagram = /\b(dag|flusso|pipeline|architettura|schema|sequenza)\b/i.test(
         placeholder.description,
       );
+      const wantsExpectedState = /\b(risultato|dovresti vedere|expected state|output)\b/i.test(
+        placeholder.description,
+      );
+      const wantsScreenshot = /\b(console|interfaccia|ui|clic|menu|pulsante|schermata)\b/i.test(
+        placeholder.description,
+      );
       items.push({
-        kind: wantsDiagram ? 'diagramma' : 'illustrazione',
+        kind: wantsDiagram
+          ? 'diagramma'
+          : wantsExpectedState
+            ? 'risultato_atteso'
+            : wantsScreenshot
+              ? 'screenshot'
+              : 'illustrazione',
         diagramType: wantsDiagram ? 'flusso' : null,
+        role: wantsExpectedState ? 'risultato' : wantsScreenshot ? 'procedura' : 'concetto',
+        requiresRealCapture: wantsScreenshot || wantsExpectedState,
         title: placeholder.description.slice(0, 200) || 'Figura richiesta dall’autore',
         caption: placeholder.description.slice(0, 500),
         altText: placeholder.description.slice(0, 500),

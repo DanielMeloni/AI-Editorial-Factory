@@ -9,11 +9,17 @@ import { recordAudit } from '@/lib/security/audit';
 import { checkRateLimit } from '@/lib/security/rate-limit';
 import type { Citation, ExportMeta } from './markdown';
 import { exportHtml } from './html';
-import { exportPdf, exportVolumePdf, exportVolumePdfLineare } from './pdf';
+import { exportVolumePdf, exportVolumePdfLineare, type VolumeChapterInput, type VolumeMeta } from './pdf';
 import { exportEpub } from './epub';
 import { deriveArticle, deriveLesson } from './derivations';
-import { rebuildVolumePreviewWith, type EsitoAnteprima } from './preview';
+import { loadChapterPdfDesign, rebuildVolumePreviewWith, type EsitoAnteprima } from './preview';
 import { scegliVersioneCompleta, type VersioneComponibile } from './volume';
+import {
+  audienceProfileSchema,
+  buildFormatterPayload,
+  inspectGeneratedPdf,
+  runPublicationPreflight,
+} from '@/lib/editorial-quality';
 
 /**
  * Produzione degli output editoriali.
@@ -30,6 +36,11 @@ export interface PublishResult {
   ok: boolean;
   message: string;
   exportId?: string;
+}
+
+export interface DeleteExportResult {
+  ok: boolean;
+  message: string;
 }
 
 const FORMATI = ['pdf', 'epub', 'html'] as const;
@@ -120,15 +131,13 @@ export async function publishChapter(input: {
   // proposta non approvata.
   const versioneConStato = (versions ?? []).find((candidate) => candidate.id === version.id);
   if (
-    chapter.status !== 'approved' &&
-    chapter.status !== 'published' &&
-    versioneConStato?.origin === 'ai_proposal' &&
-    !versioneConStato.is_approved
+    !['approved', 'published'].includes(chapter.status) ||
+    !versioneConStato?.is_approved
   ) {
     return {
       ok: false,
       message:
-        'La versione corrente è una proposta non ancora approvata. Approvala dalla scheda Revisioni prima di esportare.',
+        'Pubblicazione bloccata: il capitolo e la versione corrente devono essere approvati esplicitamente.',
     };
   }
 
@@ -137,9 +146,15 @@ export async function publishChapter(input: {
 
   const { data: project } = await supabase
     .from('projects')
-    .select('title, author, volume')
+    .select('title, subtitle, author, volume, audience_profile')
     .eq('id', chapter.project_id)
-    .maybeSingle<{ title: string; author: string; volume: string | null }>();
+    .maybeSingle<{
+      title: string;
+      subtitle: string | null;
+      author: string;
+      volume: string | null;
+      audience_profile: unknown;
+    }>();
 
   const { data: citazioni } = await supabase
     .from('citations')
@@ -170,7 +185,44 @@ export async function publishChapter(input: {
     versionNo: version.version_no,
     exportedAt: new Date().toISOString(),
   };
-  const contenutoCompleto = sanitizzaContenutoExport(version.content_md);
+  const designPdf = await loadChapterPdfDesign(
+    supabase,
+    chapter.project_id,
+    project?.title ?? '',
+    chapter.id,
+    { approvedOnly: true },
+  );
+  const audienceProfile = audienceProfileSchema.safeParse(project?.audience_profile);
+  const preflight = runPublicationPreflight({
+    manuscript: version.content_md,
+    audienceProfile: audienceProfile.success ? audienceProfile.data : null,
+    requireAudienceProfile: true,
+    visuals: designPdf.figures.map((figure) => ({
+      kind: figure.mermaidSource ? 'diagram' as const : 'illustration' as const,
+      title: figure.title ?? figure.caption ?? 'Asset senza titolo',
+      labels: figure.mermaidSource
+        ? Array.from(figure.mermaidSource.matchAll(/\[([^\]]+)\]/g), (match) => match[1] ?? '')
+        : [],
+      altText: figure.altText,
+      approved: true,
+    })),
+  });
+  if (!preflight.passed) {
+    const dettaglio = preflight.blockingIssues
+      .slice(0, 3)
+      .map((item) => `${item.line ? `riga ${item.line}: ` : ''}${item.message}`)
+      .join(' · ');
+    return {
+      ok: false,
+      message: `Pubblicazione bloccata dal preflight (${preflight.status}): ${dettaglio}`,
+    };
+  }
+  const formatterPayload = buildFormatterPayload([
+    { kind: 'manuscript_content', payload: sanitizzaContenutoExport(version.content_md), approved: true },
+    ...designPdf.figures.map((figure) => ({ kind: 'approved_asset' as const, payload: figure, approved: true })),
+    { kind: 'publication_metadata', payload: meta, approved: true },
+  ]);
+  const contenutoCompleto = formatterPayload.manuscript;
 
   // ---------------------------------------------------------------------
   // Derivazioni
@@ -258,7 +310,7 @@ export async function publishChapter(input: {
           break;
         }
         case 'pdf':
-          bytes = await exportPdfRobusto(contenutoCompleto, meta, citations);
+          bytes = await exportPdfRobusto(contenutoCompleto, meta, citations, designPdf);
           break;
         case 'epub':
           bytes = await exportEpub(contenutoCompleto, meta, { citations });
@@ -266,6 +318,37 @@ export async function publishChapter(input: {
       }
 
       const percorso = `${base}/${nomeFile}.${ESTENSIONE[formato]}`;
+      let pdfReport: Awaited<ReturnType<typeof inspectGeneratedPdf>> | null = null;
+
+      if (formato === 'pdf') {
+        const { data: previous } = await supabase
+          .from('render_snapshots')
+          .select('rendered_pages')
+          .eq('project_id', chapter.project_id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle<{ rendered_pages: unknown }>();
+        const previousPages = Array.isArray(previous?.rendered_pages)
+          ? previous.rendered_pages as Array<{ page: number; textHash: string }>
+          : [];
+        pdfReport = await inspectGeneratedPdf(bytes, previousPages);
+
+        await supabase.from('quality_gate_results').insert({
+          organization_id: organization.id,
+          project_id: chapter.project_id,
+          chapter_id: chapter.id,
+          chapter_version_id: version.id,
+          export_id: exportRow.id,
+          gate: 'layout_preflight',
+          status: pdfReport.passed ? 'passed' : 'failed',
+          blocking_issues: pdfReport.issues.filter((issue) => issue.severity === 'blocking'),
+          warnings: pdfReport.issues.filter((issue) => issue.severity === 'warning'),
+        });
+        if (!pdfReport.passed) {
+          const detail = pdfReport.issues.slice(0, 3).map((issue) => issue.message).join(' · ');
+          throw new Error(`PDF non pubblicabile: ${detail}`);
+        }
+      }
 
       const { error: uploadError } = await supabase.storage
         .from('publication-exports')
@@ -280,9 +363,28 @@ export async function publishChapter(input: {
           storage_path: percorso,
           byte_size: bytes.byteLength,
           checksum: await sha256Hex(bytes),
+          preflight_status: formato === 'pdf' ? 'passed' : 'not_applicable',
           completed_at: new Date().toISOString(),
         })
         .eq('id', exportRow.id);
+
+      if (pdfReport) {
+        await supabase.from('render_snapshots').insert({
+          organization_id: organization.id,
+          project_id: chapter.project_id,
+          export_id: exportRow.id,
+          storage_bucket: 'publication-exports',
+          storage_path: percorso,
+          checksum: pdfReport.checksum,
+          page_count: pdfReport.pageCount,
+          rendered_pages: pdfReport.pages,
+          visual_qa_status: 'passed',
+          preflight_report: {
+            issues: pdfReport.issues,
+            changedPages: pdfReport.changedPages,
+          },
+        });
+      }
 
       ultimoExportId = exportRow.id;
     } catch (error) {
@@ -291,7 +393,12 @@ export async function publishChapter(input: {
       console.error(`Esportazione ${formato} fallita`, messaggio);
       await supabase
         .from('exports')
-        .update({ status: 'failed', error: messaggio, completed_at: new Date().toISOString() })
+        .update({
+          status: 'failed',
+          preflight_status: formato === 'pdf' ? 'failed' : 'not_applicable',
+          error: messaggio,
+          completed_at: new Date().toISOString(),
+        })
         .eq('id', exportRow.id);
       errori.push(`${formato}: ${messaggio}`);
     }
@@ -334,9 +441,32 @@ async function exportPdfRobusto(
   contentMd: string,
   meta: ExportMeta,
   citations: Citation[],
+  design: Awaited<ReturnType<typeof loadChapterPdfDesign>>,
 ): Promise<Uint8Array> {
+  const capitolo: VolumeChapterInput = {
+    label: meta.chapterLabel ?? '',
+    title: meta.title,
+    contentMd,
+    versionNo: meta.versionNo,
+    approved: true,
+    figures: design.figures,
+    citations,
+  };
+  const volumeMeta: VolumeMeta = {
+    projectTitle: meta.projectTitle,
+    volumeTitle: design.volumeTitle ?? meta.projectTitle,
+    subtitle: design.subtitle,
+    author: meta.author,
+    volume: meta.volume,
+    toolLogoDataUrl: design.toolLogoDataUrl,
+    accentColor: design.accentColor,
+    generatedAt: new Date(meta.exportedAt).toLocaleString('it-IT'),
+    pending: 0,
+    drafts: 0,
+  };
+
   try {
-    return await exportPdf(contentMd, meta, { citations });
+    return await exportVolumePdf([capitolo], volumeMeta, { chapterExtract: true });
   } catch (error) {
     if (
       !/unsupported number|invalid image|unsupported image|image data/i.test(errorMessage(error))
@@ -345,33 +475,17 @@ async function exportPdfRobusto(
     }
   }
 
-  const capitolo = {
-    label: meta.chapterLabel ?? '',
-    title: meta.title,
-    contentMd,
-    versionNo: meta.versionNo,
-    approved: true,
-    figures: [],
-  };
-  const volumeMeta = {
-    projectTitle: meta.projectTitle,
-    subtitle: null,
-    author: meta.author,
-    volume: meta.volume,
-    generatedAt: new Date(meta.exportedAt).toLocaleString('it-IT'),
-    pending: 0,
-    drafts: 0,
-  };
-
   try {
-    return await exportVolumePdf([capitolo], volumeMeta);
+    return await exportVolumePdf([{ ...capitolo, figures: [] }], volumeMeta, { chapterExtract: true });
   } catch (error) {
     if (
       !/unsupported number|invalid image|unsupported image|image data/i.test(errorMessage(error))
     ) {
       throw error;
     }
-    return exportVolumePdfLineare([capitolo], volumeMeta);
+    return exportVolumePdfLineare([{ ...capitolo, figures: [] }], volumeMeta, {
+      chapterExtract: true,
+    });
   }
 }
 
@@ -405,6 +519,96 @@ export async function getExportDownloadUrl(exportId: string): Promise<string | n
     .createSignedUrl(data.storage_path, 120, { download: true });
 
   return firmato?.signedUrl ?? null;
+}
+
+/**
+ * Elimina una singola esportazione e, se non è condiviso da altre righe,
+ * anche il file conservato nello Storage privato.
+ */
+export async function deleteExport(exportId: string): Promise<DeleteExportResult> {
+  const user = await requireUser();
+  const organization = await requireOrganization();
+
+  const parsed = z.string().uuid().safeParse(exportId);
+  if (!parsed.success) return { ok: false, message: 'Esportazione non valida.' };
+
+  const supabase = await createClient();
+  const { data: esportazione, error: readError } = await supabase
+    .from('exports')
+    .select('id, project_id, organization_id, format, status, storage_bucket, storage_path')
+    .eq('id', parsed.data)
+    .maybeSingle<{
+      id: string;
+      project_id: string;
+      organization_id: string;
+      format: string;
+      status: string;
+      storage_bucket: string;
+      storage_path: string | null;
+    }>();
+
+  if (readError) {
+    return { ok: false, message: `Lettura dell’esportazione fallita: ${readError.message}` };
+  }
+  if (!esportazione || esportazione.organization_id !== organization.id) {
+    return { ok: false, message: 'Esportazione non trovata.' };
+  }
+  if (esportazione.status === 'running') {
+    return {
+      ok: false,
+      message: 'Non puoi eliminare un’esportazione in corso. Attendi il termine o interrompi prima il processo.',
+    };
+  }
+
+  await recordAudit({
+    organizationId: organization.id,
+    actorId: user.id,
+    action: 'export.deleted',
+    entityType: 'export',
+    entityId: esportazione.id,
+    metadata: {
+      projectId: esportazione.project_id,
+      format: esportazione.format,
+      status: esportazione.status,
+    },
+  });
+
+  const { error: deleteError } = await supabase
+    .from('exports')
+    .delete()
+    .eq('id', esportazione.id)
+    .eq('organization_id', organization.id);
+
+  if (deleteError) {
+    return { ok: false, message: `Eliminazione non riuscita: ${deleteError.message}` };
+  }
+
+  let storageWarning = false;
+  if (esportazione.storage_path) {
+    const { count, error: referenceError } = await supabase
+      .from('exports')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', organization.id)
+      .eq('storage_bucket', esportazione.storage_bucket)
+      .eq('storage_path', esportazione.storage_path);
+
+    if (referenceError) {
+      storageWarning = true;
+    } else if ((count ?? 0) === 0) {
+      const { error: storageError } = await supabase.storage
+        .from(esportazione.storage_bucket)
+        .remove([esportazione.storage_path]);
+      storageWarning = storageError !== null;
+    }
+  }
+
+  revalidatePath(`/projects/${esportazione.project_id}/exports`);
+  return {
+    ok: true,
+    message: storageWarning
+      ? 'Esportazione eliminata dall’elenco. Il file privato non è stato rimosso dallo Storage e potrà essere ripulito in seguito.'
+      : 'Esportazione eliminata definitivamente.',
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -14,6 +14,17 @@ export const RUN_STATUSES = [
 
 export type RunStatus = (typeof RUN_STATUSES)[number];
 
+/** Esiti bloccanti del preflight editoriale 1.1. Non sono terminali: indicano
+ * quale correzione deve rientrare nel workflow prima di un nuovo tentativo. */
+export const EDITORIAL_BLOCKING_STATUSES = [
+  'needs_content_fix',
+  'needs_source_fix',
+  'needs_visual_fix',
+  'needs_layout_fix',
+] as const;
+
+export type EditorialBlockingStatus = (typeof EDITORIAL_BLOCKING_STATUSES)[number];
+
 export const RUN_STATUS_LABELS: Record<RunStatus, string> = {
   queued: 'In coda',
   running: 'In esecuzione',

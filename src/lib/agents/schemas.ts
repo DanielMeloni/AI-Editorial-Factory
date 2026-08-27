@@ -199,8 +199,10 @@ export type RevisionOutput = z.infer<typeof revisionOutputSchema>;
 // ---------------------------------------------------------------------------
 
 export const visualPlanItemSchema = z.object({
-  kind: z.enum(['diagramma', 'illustrazione']),
+  kind: z.enum(['diagramma', 'screenshot', 'risultato_atteso', 'illustrazione']),
   diagramType: z.enum(['dag', 'flusso', 'architettura', 'sequenza', 'confronto']).nullable(),
+  role: z.enum(['concetto', 'procedura', 'risultato']),
+  requiresRealCapture: z.boolean(),
   title: z.string().max(200),
   caption: z.string().max(500),
   altText: z.string().max(500),

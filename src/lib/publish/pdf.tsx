@@ -464,6 +464,7 @@ export interface VolumeChapterInput {
   partId?: string | null;
   partNumber?: number | null;
   partTitle?: string | null;
+  citations?: Citation[];
 }
 
 /**
@@ -554,9 +555,15 @@ function renderFigure(figure: VolumeFigure, key: string): React.ReactNode {
   );
 }
 
+export interface VolumePdfOptions {
+  /** Estratto editoriale: niente copertine, indice o apertura della parte. */
+  chapterExtract?: boolean;
+}
+
 export async function exportVolumePdf(
   chapters: VolumeChapterInput[],
   meta: VolumeMeta,
+  options: VolumePdfOptions = {},
 ): Promise<Uint8Array> {
   const gruppiParte = raggruppaParti(chapters);
   const pagineIndice = calcolaPagineIndice(chapters);
@@ -569,12 +576,12 @@ export async function exportVolumePdf(
       language="it"
     >
       {/* Copertina fronte, se approvata; altrimenti frontespizio tipografico. */}
-      {meta.frontCoverDataUrl ? (
+      {!options.chapterExtract && meta.frontCoverDataUrl ? (
         <Page size="A4" style={{ padding: 0 }}>
           {/* eslint-disable-next-line jsx-a11y/alt-text */}
           <Image src={meta.frontCoverDataUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         </Page>
-      ) : <Page size="A4" style={styles.page}>
+      ) : !options.chapterExtract ? <Page size="A4" style={styles.page}>
         <View style={{ marginTop: 140 }}>
           <Text style={styles.eyebrow}>ANTEPRIMA DI LAVORAZIONE</Text>
           <Text style={{ ...styles.titolo, fontSize: 30 }}>{meta.projectTitle}</Text>
@@ -595,10 +602,10 @@ export async function exportVolumePdf(
             {meta.pending > 0 ? ` · ${meta.pending} non ancora scritti` : ''}
           </Text>
         </View>
-      </Page>}
+      </Page> : null}
 
       {/* Indice */}
-      {chapters.length > 0 ? (
+      {!options.chapterExtract && chapters.length > 0 ? (
         <Page size="A4" style={styles.page}>
           <Testatina meta={meta} label="SOMMARIO" accent={meta.accentColor ?? colori.accento} />
           <Text style={styles.titolo}>Indice</Text>
@@ -635,7 +642,7 @@ export async function exportVolumePdf(
 
         return (
           <React.Fragment key={`cap-${indice}`}>
-            {(indice === 0 || chapters[indice - 1]?.partId !== capitolo.partId) && capitolo.partTitle ? (
+            {!options.chapterExtract && (indice === 0 || chapters[indice - 1]?.partId !== capitolo.partId) && capitolo.partTitle ? (
               <Page size="A4" style={styles.page}>
                 <Testatina meta={meta} label={`PARTE ${capitolo.partNumber ?? ''} · ${capitolo.partTitle}`} accent={accent} />
                 <Text style={{ fontSize: 11, color: accent, fontFamily: 'Helvetica-Bold', letterSpacing: 1, marginTop: 100 }}>
@@ -678,7 +685,7 @@ export async function exportVolumePdf(
                   ))}
                 </View>
               </View>
-              <PiePagina meta={meta} numerazione="araba" />
+              <PiePagina meta={meta} numerazione="araba" offset={options.chapterExtract ? 0 : 2} />
             </Page>
 
             {sezioni.map((sezione, sezioneIndice) => (
@@ -699,9 +706,24 @@ export async function exportVolumePdf(
                 {sezioneIndice === sezioni.length - 1
                   ? capitolo.figures.slice(indiceFigura).map((figura, i) => renderFigure(figura, `c${indice}-extra${i}`))
                   : null}
-                <PiePagina meta={meta} numerazione="araba" />
+                <PiePagina meta={meta} numerazione="araba" offset={options.chapterExtract ? 0 : 2} />
               </Page>
             ))}
+            {options.chapterExtract && (capitolo.citations?.length ?? 0) > 0 ? (
+              <Page size="A4" style={{ ...styles.page, paddingTop: 72 }}>
+                <Testatina meta={meta} label={`${numero} · RIFERIMENTI`} accent={accent} />
+                <View style={styles.riferimenti}>
+                  <Text style={styles.titoloRiferimenti}>Riferimenti</Text>
+                  {capitolo.citations!.map((citation, citationIndex) => (
+                    <Text key={`cap-ref-${citationIndex}`} style={styles.riferimento}>
+                      {citationIndex + 1}. {citation.title || citation.publisher || citation.url} — {citation.url}
+                      {citation.isOfficial ? ' (documentazione ufficiale)' : ''}
+                    </Text>
+                  ))}
+                </View>
+                <PiePagina meta={meta} numerazione="araba" offset={0} />
+              </Page>
+            ) : null}
           </React.Fragment>
         );
       })}
@@ -719,7 +741,7 @@ export async function exportVolumePdf(
         </Page>
       ) : null}
 
-      {meta.backCoverDataUrl ? (
+      {!options.chapterExtract && meta.backCoverDataUrl ? (
         <Page size="A4" style={{ padding: 0 }}>
           {/* eslint-disable-next-line jsx-a11y/alt-text */}
           <Image src={meta.backCoverDataUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -739,6 +761,7 @@ export async function exportVolumePdf(
 export async function exportVolumePdfLineare(
   chapters: VolumeChapterInput[],
   meta: VolumeMeta,
+  options: VolumePdfOptions = {},
 ): Promise<Uint8Array> {
   const gruppiParte = raggruppaParti(chapters);
   const pagineIndice = calcolaPagineIndice(chapters);
@@ -748,12 +771,12 @@ export async function exportVolumePdfLineare(
       author={pulisciTestoPdf(meta.author)}
       creator="AI Editorial Factory"
     >
-      {meta.frontCoverDataUrl ? (
+      {!options.chapterExtract && meta.frontCoverDataUrl ? (
         <Page size="A4" style={{ padding: 0 }}>
           {/* eslint-disable-next-line jsx-a11y/alt-text */}
           <Image src={meta.frontCoverDataUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         </Page>
-      ) : <Page size="A4" style={{ padding: 56, fontFamily: 'Helvetica', fontSize: 10 }}>
+      ) : !options.chapterExtract ? <Page size="A4" style={{ padding: 56, fontFamily: 'Helvetica', fontSize: 10 }}>
         <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 26, marginTop: 120, marginBottom: 14 }}>
           {pulisciTestoPdf(meta.projectTitle)}
         </Text>
@@ -764,9 +787,9 @@ export async function exportVolumePdfLineare(
         <Text style={{ marginTop: 28, fontSize: 9 }}>
           Anteprima lineare di sicurezza · {chapters.length} capitoli
         </Text>
-      </Page>}
+      </Page> : null}
 
-      <Page size="A4" style={styles.page}>
+      {!options.chapterExtract ? <Page size="A4" style={styles.page}>
         <Testatina meta={meta} label="SOMMARIO" accent={meta.accentColor ?? colori.accento} />
         <Text style={styles.titolo}>Indice</Text>
         {gruppiParte.map((parte) => (
@@ -776,7 +799,7 @@ export async function exportVolumePdfLineare(
           </View>
         ))}
         <PiePagina meta={meta} numerazione="romana" />
-      </Page>
+      </Page> : null}
 
       {chapters.map((chapter, indice) => {
         const tree = parsePdfMarkdown(chapter.contentMd, chapter.title);
@@ -797,7 +820,7 @@ export async function exportVolumePdfLineare(
 
         return (
           <React.Fragment key={`safe-${indice}`}>
-            {(indice === 0 || chapters[indice - 1]?.partId !== chapter.partId) && chapter.partTitle ? (
+            {!options.chapterExtract && (indice === 0 || chapters[indice - 1]?.partId !== chapter.partId) && chapter.partTitle ? (
               <Page size="A4" style={styles.page}>
                 <Testatina meta={meta} label={`PARTE ${chapter.partNumber ?? ''} · ${chapter.partTitle}`} accent={accent} />
                 <Text style={{ marginTop: 110, fontFamily: 'Helvetica-Bold', fontSize: 11, color: accent }}>PARTE {chapter.partNumber ?? ''}</Text>
@@ -832,7 +855,7 @@ export async function exportVolumePdfLineare(
                   ))}
                 </View>
               </View>
-              <PiePagina meta={meta} numerazione="araba" />
+              <PiePagina meta={meta} numerazione="araba" offset={options.chapterExtract ? 0 : 2} />
             </Page>
 
             {sezioniSicure.flatMap((sezione, sezioneIndice) => sezione.pagine.map((testoPagina, paginaIndice) => (
@@ -846,13 +869,13 @@ export async function exportVolumePdfLineare(
                 <Text style={{ fontSize: 9.5, lineHeight: 1.55, textAlign: 'justify' }}>
                   {testoPagina}
                 </Text>
-                <PiePagina meta={meta} numerazione="araba" />
+                <PiePagina meta={meta} numerazione="araba" offset={options.chapterExtract ? 0 : 2} />
               </Page>
             )))}
           </React.Fragment>
         );
       })}
-      {meta.backCoverDataUrl ? (
+      {!options.chapterExtract && meta.backCoverDataUrl ? (
         <Page size="A4" style={{ padding: 0 }}>
           {/* eslint-disable-next-line jsx-a11y/alt-text */}
           <Image src={meta.backCoverDataUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -951,7 +974,7 @@ function Testatina({ meta, label, accent }: { meta: VolumeMeta; label: string; a
   );
 }
 
-function PiePagina({ meta, numerazione }: { meta: VolumeMeta; numerazione: 'romana' | 'araba' }) {
+function PiePagina({ meta, numerazione, offset }: { meta: VolumeMeta; numerazione: 'romana' | 'araba'; offset?: number }) {
   return (
     <>
       <View style={styles.piede} fixed>
@@ -963,7 +986,7 @@ function PiePagina({ meta, numerazione }: { meta: VolumeMeta; numerazione: 'roma
         style={styles.numeroPagina}
         fixed
         render={({ pageNumber }) => {
-          const numero = Math.max(1, pageNumber - (numerazione === 'romana' ? 1 : 2));
+          const numero = Math.max(1, pageNumber - (offset ?? (numerazione === 'romana' ? 1 : 2)));
           return numerazione === 'romana' ? numeroRomano(numero).toLowerCase() : String(numero);
         }}
       />

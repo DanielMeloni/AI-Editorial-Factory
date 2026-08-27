@@ -44,6 +44,13 @@ export const createProjectSchema = z.object({
   scope: z.string().trim().max(3000).optional().or(z.literal('')),
   outOfScope: z.string().trim().max(2000).optional().or(z.literal('')),
   audience: z.string().trim().max(1000).optional().or(z.literal('')),
+  audienceGoal: z.string().trim().max(2000).optional().or(z.literal('')),
+  allowedPrerequisites: z.string().trim().max(3000).optional().or(z.literal('')),
+  jargonBudget: z.coerce.number().int().min(0).max(100).default(5),
+  quickWinMaxPages: z.coerce.number().int().min(1).max(200).default(25),
+  advancedContentPolicy: z.enum(['inline', 'callout', 'appendix', 'next_volume']).default('appendix'),
+  requireUiScreenshots: z.boolean().default(true),
+  requireExpectedStateVisuals: z.boolean().default(true),
 });
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;

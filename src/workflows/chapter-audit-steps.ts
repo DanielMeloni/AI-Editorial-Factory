@@ -34,6 +34,12 @@ import type {
   VisualPlanOutput,
 } from '@/lib/agents/schemas';
 import { randomUUID } from 'node:crypto';
+import {
+  audienceProfileSchema,
+  runAudienceFitGate,
+  runChapterCompletenessGate,
+  runLeakageGuard,
+} from '@/lib/editorial-quality';
 
 /**
  * Step del workflow di audit.
@@ -282,7 +288,7 @@ export async function draftChapter(
       db
         .from('projects')
         .select(
-          'language, level, tone, register, style_notes, work_shape, target_pages, scope, out_of_scope, audience',
+          'language, level, tone, register, style_notes, work_shape, target_pages, scope, out_of_scope, audience, audience_profile',
         )
         .eq('id', context.projectId)
         .maybeSingle<{
@@ -296,6 +302,7 @@ export async function draftChapter(
           scope: string | null;
           out_of_scope: string | null;
           audience: string | null;
+          audience_profile: unknown;
         }>(),
       db
         .from('chapter_versions')
@@ -423,6 +430,9 @@ export async function draftChapter(
         outOfScope: project?.out_of_scope,
         audience: project?.audience,
       }),
+      audienceProfileSchema.safeParse(project?.audience_profile).success
+        ? istruzioniAudienceProfile(audienceProfileSchema.parse(project?.audience_profile))
+        : '',
       // Il budget del volume diviso per i capitoli che lo compongono. Senza,
       // «cento pagine» resta un'intenzione dell'editore che non raggiunge mai
       // chi scrive il singolo capitolo.
@@ -514,6 +524,15 @@ export async function draftChapter(
     corpo,
     apparato,
   );
+  const audienceProfile = audienceProfileSchema.safeParse(project?.audience_profile);
+  const qualityGates = [
+    runLeakageGuard(contentMd),
+    runChapterCompletenessGate(
+      contentMd,
+      piano.sections.map((sezione) => ({ title: sezione.title, required: true, minimumWords: 35 })),
+    ),
+    runAudienceFitGate(contentMd, audienceProfile.success ? audienceProfile.data : null),
+  ];
 
   const { data: last } = await db
     .from('chapter_versions')
@@ -547,11 +566,27 @@ export async function draftChapter(
       word_count: wordCount,
       parent_version_id: baseVersionId,
       workflow_run_id: context.workflowRunId,
+      artifact_kind: 'manuscript_content',
     })
     .select('id')
     .single<{ id: string }>();
 
   if (error || !created) throw new Error(error?.message ?? 'Stesura non registrata.');
+
+  const { error: gateError } = await db.from('quality_gate_results').insert(
+    qualityGates.map((gate) => ({
+      organization_id: context.organizationId,
+      project_id: context.projectId,
+      chapter_id: context.chapterId,
+      chapter_version_id: created.id,
+      workflow_run_id: context.workflowRunId,
+      gate: gate.gate,
+      status: gate.passed ? 'passed' : 'failed',
+      blocking_issues: gate.issues.filter((item) => item.severity === 'blocking'),
+      warnings: gate.issues.filter((item) => item.severity === 'warning'),
+    })),
+  );
+  if (gateError) throw new Error(`Registrazione dei quality gate fallita: ${gateError.message}`);
 
   await db
     .from('chapters')
@@ -588,6 +623,20 @@ export async function draftChapter(
     gaps,
     grounded: gaps.length === 0,
   };
+}
+
+function istruzioniAudienceProfile(profile: ReturnType<typeof audienceProfileSchema.parse>): string {
+  return [
+    '- Audience profile vincolante:',
+    `  - livello: ${profile.level}`,
+    `  - obiettivo: ${profile.goal}`,
+    `  - prerequisiti ammessi: ${profile.allowedPrerequisites.join(', ') || 'nessuno'}`,
+    `  - budget di gergo avanzato: ${profile.jargonBudget}`,
+    `  - quick win entro pagina ${profile.quickWinMaxPages}`,
+    `  - contenuti avanzati: ${profile.advancedContentPolicy}`,
+    `  - screenshot UI obbligatori: ${profile.requireUiScreenshots ? 'sì' : 'no'}`,
+    `  - visual del risultato atteso obbligatori: ${profile.requireExpectedStateVisuals ? 'sì' : 'no'}`,
+  ].join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -1042,6 +1091,19 @@ export async function planVisuals(
       stepName: 'piano-visuale',
     },
   );
+
+  const { error } = await createAdminClient().from('editorial_artifacts').insert({
+    organization_id: context.organizationId,
+    project_id: context.projectId,
+    chapter_id: context.chapterId,
+    workflow_run_id: context.workflowRunId,
+    agent_run_id: result.agentRunId,
+    kind: 'visual_spec',
+    payload: result.output,
+    approved: false,
+    created_by: context.actorId,
+  });
+  if (error) throw new Error(`Registrazione del visual spec fallita: ${error.message}`);
 
   return result.output;
 }

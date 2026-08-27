@@ -157,6 +157,66 @@ export function CreateProjectForm() {
         </Field>
 
         <Field
+          id="audienceGoal"
+          label="Obiettivo del lettore"
+          hint="Risultato concreto che il lettore deve raggiungere al termine del percorso."
+          error={state.fieldErrors?.audienceGoal}
+        >
+          {({ id, describedBy }) => (
+            <textarea
+              id={id}
+              name="audienceGoal"
+              rows={2}
+              aria-describedby={describedBy}
+              placeholder="Es. completare una prima pipeline guidata e verificarne il risultato"
+              className="flex w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
+            />
+          )}
+        </Field>
+
+        <Field
+          id="allowedPrerequisites"
+          label="Prerequisiti ammessi"
+          hint="Uno per riga. Gli agenti non possono dare per acquisito altro."
+          error={state.fieldErrors?.allowedPrerequisites}
+        >
+          {({ id, describedBy }) => (
+            <textarea
+              id={id}
+              name="allowedPrerequisites"
+              rows={3}
+              aria-describedby={describedBy}
+              placeholder={'Concetto elementare di tabella\nQuery SQL di base'}
+              className="flex w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
+            />
+          )}
+        </Field>
+
+        <div className="grid gap-5 sm:grid-cols-3">
+          <Field id="jargonBudget" label="Budget gergo" hint="Massimo riferimenti avanzati per capitolo." error={state.fieldErrors?.jargonBudget}>
+            {({ id, describedBy }) => <Input id={id} name="jargonBudget" type="number" min={0} max={100} defaultValue={5} aria-describedby={describedBy} />}
+          </Field>
+          <Field id="quickWinMaxPages" label="Quick win entro pagina" error={state.fieldErrors?.quickWinMaxPages}>
+            {({ id, describedBy }) => <Input id={id} name="quickWinMaxPages" type="number" min={1} max={200} defaultValue={25} aria-describedby={describedBy} />}
+          </Field>
+          <Field id="advancedContentPolicy" label="Contenuti avanzati" error={state.fieldErrors?.advancedContentPolicy}>
+            {({ id, describedBy }) => (
+              <select id={id} name="advancedContentPolicy" defaultValue="appendix" aria-describedby={describedBy} className="flex h-10 w-full rounded-lg border border-border-strong bg-surface px-3 text-sm text-foreground">
+                <option value="inline">Nel flusso principale</option>
+                <option value="callout">Box approfondimento</option>
+                <option value="appendix">Appendice</option>
+                <option value="next_volume">Volume successivo</option>
+              </select>
+            )}
+          </Field>
+        </div>
+
+        <div className="grid gap-3 text-sm sm:grid-cols-2">
+          <label className="flex items-start gap-2"><input type="checkbox" name="requireUiScreenshots" defaultChecked className="mt-1" />Ogni procedura UI significativa richiede screenshot.</label>
+          <label className="flex items-start gap-2"><input type="checkbox" name="requireExpectedStateVisuals" defaultChecked className="mt-1" />Ogni risultato operativo richiede uno stato atteso visuale.</label>
+        </div>
+
+        <Field
           id="scope"
           label="Cosa deve coprire"
           hint="Es. le regole base di SQL: SELECT, JOIN, aggregazioni, sottoquery"

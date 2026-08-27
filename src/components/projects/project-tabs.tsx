@@ -21,6 +21,7 @@ const FASI = [
 const STRUMENTI = [
   { segment: '', label: 'Panoramica' }, { segment: 'workflows', label: 'Esecuzioni' },
   { segment: 'visual-studio', label: 'Figure' },
+  { segment: 'quality', label: 'Qualità' },
 ] as const;
 
 export function ProjectTabs({ projectId, stati = {}, volumes }: { projectId: string; stati?: Partial<Record<string, StatoScheda>>; volumes: ProjectVolumeRow[] }) {

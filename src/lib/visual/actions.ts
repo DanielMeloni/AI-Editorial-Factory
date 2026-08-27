@@ -1180,3 +1180,49 @@ export async function deleteToolLogo(assetId: string): Promise<VisualActionResul
 function isToolLogoAsset(asset: { kind: string; storage_path: string | null }): boolean {
   return asset.kind === 'logo' || asset.storage_path?.includes('/tool-logo/') === true;
 }
+
+// ---------------------------------------------------------------------------
+// Schermate procedurali e risultati attesi
+// ---------------------------------------------------------------------------
+
+export async function requestEditorialCaptureTicket(input: {
+  projectId: string; filename: string; byteSize: number; mimeType: string;
+}): Promise<CoverReferenceTicket | { ok: false; message: string }> {
+  await requireUser();
+  const organization = await requireOrganization();
+  if (!z.string().uuid().safeParse(input.projectId).success) return { ok: false, message: 'Progetto non valido.' };
+  if (!MIME_RIFERIMENTO.includes(input.mimeType as (typeof MIME_RIFERIMENTO)[number])) return { ok: false, message: 'Formati ammessi: PNG, JPEG, WebP.' };
+  if (input.byteSize <= 0 || input.byteSize > MAX_BYTE_RIFERIMENTO) return { ok: false, message: 'L’immagine supera i 10 MB.' };
+  const supabase = await createClient();
+  const { data: project } = await supabase.from('projects').select('id').eq('id', input.projectId).eq('organization_id', organization.id).maybeSingle();
+  if (!project) return { ok: false, message: 'Progetto non trovato.' };
+  const assetId = crypto.randomUUID();
+  const extension = input.mimeType === 'image/jpeg' ? 'jpg' : input.mimeType === 'image/webp' ? 'webp' : 'png';
+  const path = `${organization.id}/${input.projectId}/editorial-captures/${assetId}.${extension}`;
+  const { data, error } = await supabase.storage.from('generated-assets').createSignedUploadUrl(path);
+  if (error || !data) return { ok: false, message: 'Impossibile preparare il caricamento.' };
+  return { ok: true, assetId, bucket: 'generated-assets', path, token: data.token };
+}
+
+export async function confirmEditorialCapture(input: {
+  projectId: string; assetId: string; path: string; filename: string;
+  role: 'procedure' | 'result'; caption: string; altText: string;
+}): Promise<VisualActionResult> {
+  const user = await requireUser();
+  const organization = await requireOrganization();
+  const parsed = z.object({ projectId: z.string().uuid(), assetId: z.string().uuid(), path: z.string(), filename: z.string().max(300), role: z.enum(['procedure', 'result']), caption: z.string().trim().min(3).max(1000), altText: z.string().trim().min(3).max(1000) }).safeParse(input);
+  if (!parsed.success || !input.path.startsWith(`${organization.id}/${input.projectId}/editorial-captures/`)) return { ok: false, message: 'Dati della schermata non validi.' };
+  const supabase = await createClient();
+  const { data: latest } = await supabase.from('visual_assets').select('version').eq('project_id', input.projectId).eq('kind', 'illustration').order('version', { ascending: false }).limit(1).maybeSingle<{ version: number }>();
+  const { error } = await supabase.from('visual_assets').insert({
+    id: input.assetId, project_id: input.projectId, organization_id: organization.id,
+    kind: 'illustration', generator: 'upload', status: 'pending_approval', version: (latest?.version ?? 0) + 1,
+    title: input.role === 'procedure' ? 'Schermata procedurale' : 'Risultato atteso',
+    caption: input.caption, alt_text: input.altText, storage_bucket: 'generated-assets', storage_path: input.path,
+    visual_role: input.role, capture_source: 'ui_capture', quality_metadata: { originalFilename: input.filename },
+    cost_usd: 0, created_by: user.id,
+  });
+  if (error) { await supabase.storage.from('generated-assets').remove([input.path]); return { ok: false, message: `Registrazione non riuscita: ${error.message}` }; }
+  revalidatePath(`/projects/${input.projectId}/visual-studio`);
+  return { ok: true, assetId: input.assetId, message: 'Schermata registrata e inviata in approvazione.' };
+}

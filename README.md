@@ -242,6 +242,7 @@ Dettagli in [`docs/deployment.md`](docs/deployment.md) (Fase 7).
 | [`docs/series.md`](docs/series.md) | **Fase 8**: collane, ereditarietà, coerenza multi-volume |
 | [`docs/security.md`](docs/security.md) | Controlli attivi, con i test che li verificano |
 | [`docs/deployment.md`](docs/deployment.md) | Vercel, variabili, elenco di controllo, rollback |
+| [`docs/editorial-quality.md`](docs/editorial-quality.md) | Hardening 1.1: artifact isolation, audience profile, gate P0 e preflight |
 | [`docs/dataform-pilot.md`](docs/dataform-pilot.md) | Struttura del volume pilota e mappatura editoriale |
 
 ---
@@ -287,8 +288,8 @@ non viene mai modificato.
 ```
 npm run lint       0 errori
 npm run typecheck  0 errori
-npm test           469 test su 30 file
-npm run build      26 rotte
+npm test           501 test su 35 file
+npm run build      completata, 32 rotte applicative
 npm run test:smoke 22 controlli HTTP su build di produzione
 ```
 

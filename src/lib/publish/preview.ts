@@ -255,6 +255,41 @@ async function raccogliLogoStrumento(
   return { dataUrl: rasterDataUrlSicuro(Buffer.from(await file.arrayBuffer())), accentColor };
 }
 
+/** Dati visivi condivisi dal manuale e dagli estratti di capitolo. */
+export async function loadChapterPdfDesign(
+  supabase: SupabaseClient,
+  projectId: string,
+  projectTitle: string,
+  chapterId: string,
+  options: { approvedOnly?: boolean } = {},
+): Promise<{
+  volumeTitle: string | null;
+  subtitle: string | null;
+  toolLogoDataUrl: string | null;
+  accentColor: string;
+  figures: VolumeFigure[];
+}> {
+  const [{ data: volume }, marchio, figure] = await Promise.all([
+    supabase
+      .from('project_volumes')
+      .select('title, subtitle')
+      .eq('project_id', projectId)
+      .order('volume_number', { ascending: true })
+      .limit(1)
+      .maybeSingle<{ title: string; subtitle: string | null }>(),
+    raccogliLogoStrumento(supabase, projectId, projectTitle),
+    raccogliFigure(supabase, [chapterId], options),
+  ]);
+
+  return {
+    volumeTitle: volume?.title ?? null,
+    subtitle: volume?.subtitle ?? null,
+    toolLogoDataUrl: marchio.dataUrl,
+    accentColor: marchio.accentColor,
+    figures: figure.get(chapterId) ?? [],
+  };
+}
+
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes as unknown as ArrayBuffer);
   return Array.from(new Uint8Array(digest))
@@ -275,19 +310,23 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 async function raccogliFigure(
   supabase: SupabaseClient,
   chapterIds: string[],
+  options: { approvedOnly?: boolean } = {},
 ): Promise<Map<string, VolumeFigure[]>> {
   const perCapitolo = new Map<string, VolumeFigure[]>();
   if (chapterIds.length === 0) return perCapitolo;
 
-  const { data: assets } = await supabase
+  let query = supabase
     .from('visual_assets')
     .select(
       'chapter_id, title, caption, alt_text, mermaid_source, storage_bucket, storage_path, version, status',
     )
-    .in('chapter_id', chapterIds)
+    .in('chapter_id', chapterIds);
+  query = options.approvedOnly
+    ? query.eq('status', 'approved')
     // L'anteprima è uno spazio di lavoro: mostra anche l'ultima figura in
     // revisione del capitolo. Restano fuori soltanto gli asset rifiutati.
-    .neq('status', 'rejected')
+    : query.neq('status', 'rejected');
+  const { data: assets } = await query
     .order('version', { ascending: false })
     .returns<
       {

@@ -21,7 +21,7 @@ export default async function VisualStudioPage({
     <main id="contenuto-principale" className="flex-1 space-y-6 p-4 sm:p-6">
       <PageHeader
         title="Visual Studio"
-        description="Diagrammi esatti generati dal codice e illustrazioni concettuali. Nessun asset entra nell’opera senza approvazione."
+        description="Diagrammi esatti, illustrazioni concettuali e schermate reali di procedura o risultato. Nessun asset entra nell’opera senza approvazione."
       />
 
       <VisualStudio

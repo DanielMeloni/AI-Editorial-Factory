@@ -7,6 +7,7 @@ export interface ExportRow {
   chapter_id: string | null;
   format: 'markdown' | 'html' | 'pdf' | 'json' | 'epub';
   status: 'queued' | 'running' | 'ready' | 'failed';
+  preflight_status: 'pending' | 'passed' | 'failed' | 'not_applicable';
   storage_path: string | null;
   byte_size: number | null;
   checksum: string | null;

@@ -27,6 +27,9 @@ export interface AssetRow {
   cost_usd: number;
   created_at: string;
   approved_at: string | null;
+  visual_role: 'concept' | 'procedure' | 'result' | null;
+  capture_source: 'generated' | 'uploaded' | 'ui_capture' | null;
+  quality_metadata: Record<string, unknown>;
 }
 
 export async function listProjectAssets(projectId: string): Promise<AssetRow[]> {
